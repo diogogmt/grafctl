@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/grafana-tools/sdk"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -31,6 +32,11 @@ type DashboardBackupCmd struct {
 	Conf *DashboardBackupConfig
 
 	*ffcli.Command
+}
+
+type DashboardDump struct {
+	Dashboard sdk.Board           `json:"dashboard"`
+	Meta      sdk.BoardProperties `json:"meta"`
 }
 
 // NewDashboardBackupCmd creates a new DashboardBackupCmd
@@ -84,7 +90,7 @@ func (c *DashboardBackupCmd) Exec(ctx context.Context, args []string) error {
 		return fmt.Errorf("provider %q not supported", c.Conf.Provider)
 	}
 
-	boards, err := c.Conf.Client().SearchDashboards(ctx, "", false)
+	foundBoards, err := c.Conf.Client().SearchDashboards(ctx, "", false)
 	if err != nil {
 		return err
 	}
@@ -92,14 +98,22 @@ func (c *DashboardBackupCmd) Exec(ctx context.Context, args []string) error {
 	var b bytes.Buffer
 	tarWriter := tar.NewWriter(&b)
 	defer tarWriter.Close()
-	for _, board := range boards {
-		boardBy, err := json.Marshal(board)
+	for _, foundBoard := range foundBoards {
+		board, boardMeta, err := c.Conf.Client().GetDashboardByUID(ctx, foundBoard.UID)
+		if err != nil {
+			return err
+		}
+
+		boardBy, err := json.Marshal(&DashboardDump{
+			Dashboard: board,
+			Meta:      boardMeta,
+		})
 		if err != nil {
 			return err
 		}
 		header := &tar.Header{
 			Name:    fmt.Sprintf("%s-%s.json", board.UID, strings.ReplaceAll(board.Title, " ", "_")),
-			Mode:    int64(644),
+			Mode:    int64(0644),
 			ModTime: time.Now(),
 			Size:    int64(len(boardBy)),
 		}
@@ -124,17 +138,20 @@ func (c *DashboardBackupCmd) Exec(ctx context.Context, args []string) error {
 	case "gcs":
 		ctx, cancel := context.WithTimeout(ctx, time.Second*15)
 		defer cancel()
-		wc := gcsBucket.Object(backupName).NewWriter(ctx)
-		if _, err = io.Copy(wc, bytes.NewReader(b.Bytes())); err != nil {
+		objectWriter := gcsBucket.Object(backupName).NewWriter(ctx)
+		if _, err = io.Copy(objectWriter, bytes.NewReader(b.Bytes())); err != nil {
 			return err
 		}
-		if err := wc.Close(); err != nil {
+		if err := objectWriter.Close(); err != nil {
 			return err
 		}
+		fmt.Printf("gs://%s/%s\n", c.Conf.Out, backupName)
 	case "local":
-		if err := ioutil.WriteFile(filepath.Join(c.Conf.Out, backupName), b.Bytes(), 0644); err != nil {
+		p := filepath.Join(c.Conf.Out, backupName)
+		if err := ioutil.WriteFile(p, b.Bytes(), 0644); err != nil {
 			return err
 		}
+		fmt.Printf("%s\n", p)
 	default:
 		return fmt.Errorf("provider %q not supported", c.Conf.Provider)
 	}

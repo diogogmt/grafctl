@@ -11,6 +11,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.4
 	github.com/peterbourgon/ff/v2 v2.0.0
 	github.com/pkg/errors v0.9.1 // indirect
+	gopkg.in/square/go-jose.v2 v2.5.1
 )
 
 // replace github.com/grafana-tools/sdk => /Users/diogo/proj/sandbox/grafana-sdk
