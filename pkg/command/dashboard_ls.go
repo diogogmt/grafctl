@@ -3,8 +3,10 @@ package command
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
+	"os"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -49,15 +51,20 @@ func (c *DashboardLsCmd) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.Conf.UID, "uid", "", "dashboard UID")
 }
 
-// Exec executes the dashboardLs command
+// Exec executes the dashboard ls command
 func (c *DashboardLsCmd) Exec(ctx context.Context, args []string) error {
 	boards, err := c.Conf.Client().SearchDashboards(ctx, "", false)
 	if err != nil {
 		return err
 	}
-	// TODO(dm): use table writter
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"UID", "Folder", "Title", "URL"})
+
 	for _, board := range boards {
-		log.Printf("board: %+v", board)
+		table.Append([]string{board.UID, board.FolderTitle, board.Title, fmt.Sprintf("%s/%s", c.Conf.APIURL, board.URL)})
 	}
+	table.Render()
+
 	return nil
 }

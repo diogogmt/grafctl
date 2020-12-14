@@ -17,12 +17,14 @@ type Client struct {
 }
 
 func NewClient(apiURL string, apiKey string) *Client {
+	// TODO(dm): validate URL and client
 	return &Client{
 		Client: sdk.NewClient(apiURL, apiKey, sdk.DefaultHTTPClient),
 	}
 }
 
 func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir string) error {
+	// TODO(dm): check if queriesDir exist, if not filepath.Walk panics
 	board, boardProps, err := c.GetDashboardByUID(ctx, uid)
 	if err != nil {
 		return err

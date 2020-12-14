@@ -30,7 +30,7 @@ type RootConfigOption = func(c *RootConfig)
 
 // NewRootCmd creates a new RootCmd
 func NewRootCmd(opts ...RootConfigOption) *RootCmd {
-	fs := flag.NewFlagSet("hbd", flag.ExitOnError)
+	fs := flag.NewFlagSet("grafctl", flag.ExitOnError)
 
 	conf := RootConfig{}
 	for _, opt := range opts {

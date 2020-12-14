@@ -38,6 +38,7 @@ func NewDashboardCmd(rootConf *RootConfig) *DashboardCmd {
 		Exec:       cmd.Exec,
 		Subcommands: []*ffcli.Command{
 			NewDashboardLsCmd(&conf).Command,
+			NewDashboardInspectCmd(&conf).Command,
 			NewDashboardBackupCmd(&conf).Command,
 			NewDashboardSyncCmd(&conf).Command,
 		},
