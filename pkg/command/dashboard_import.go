@@ -138,12 +138,14 @@ func (c *DashboardImportCmd) Exec(ctx context.Context, args []string) error {
 	for _, dashboardDump := range dashboardDumps {
 		fmt.Printf("dashboard %d %s %s - folder %d %s\n", dashboardDump.Dashboard.ID, dashboardDump.Dashboard.UID, dashboardDump.Dashboard.Title, dashboardDump.Meta.FolderID, dashboardDump.Meta.FolderTitle)
 		folder, ok := foldersMap[dashboardDump.Meta.FolderTitle]
-		if !ok {
+		// skip creating default General folder
+		if !ok && folder.ID != 0 {
 			fmt.Printf("creating new folder\n")
 			var err error
 			if folder, err = c.Conf.Client().CreateFolder(ctx, sdk.Folder{Title: dashboardDump.Meta.FolderTitle}); err != nil {
 				return err
 			}
+			foldersMap[folder.Title] = folder
 		}
 		dashboardDump.Dashboard.ID = 0
 		// TODO(dm): remove the hack once the SDK is patched, without it keeps appending new annotations to the dashboard

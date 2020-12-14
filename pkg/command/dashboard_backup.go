@@ -132,7 +132,8 @@ func (c *DashboardBackupCmd) Exec(ctx context.Context, args []string) error {
 		return err
 	}
 
-	backupName := fmt.Sprintf("%s-%s.tar", strings.ReplaceAll(u.Host, ".", "_"), time.Now().Format("2006-01-02"))
+	now := time.Now().UTC()
+	backupName := fmt.Sprintf("%s-%s-%d.tar", strings.ReplaceAll(u.Host, ".", "_"), now.Format("2006-01-02"), now.UnixNano())
 
 	switch c.Conf.Provider {
 	case "gcs":
