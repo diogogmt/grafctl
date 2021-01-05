@@ -50,7 +50,18 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		return err
 	}
 
+	panels := []*sdk.Panel{}
 	for _, panel := range board.Panels {
+		if panel.RowPanel != nil {
+			for _, nestedPanel := range panel.RowPanel.Panels {
+				nestedPanel := nestedPanel
+				panels = append(panels, &nestedPanel)
+			}
+		}
+		panels = append(panels, panel)
+	}
+
+	for _, panel := range panels {
 		if panel.Description == nil {
 			continue
 		}
