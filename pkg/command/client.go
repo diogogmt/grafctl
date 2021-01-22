@@ -41,7 +41,7 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 
 	queries := map[string]string{}
 	if err := filepath.Walk(queriesDir, func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() || filepath.Ext(path) != ".sql" {
+		if info.IsDir() {
 			return nil
 		}
 		queries[strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")] = path
@@ -65,38 +65,47 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		if panel.Description == nil {
 			continue
 		}
-		queryName := ""
+
 		for _, part := range strings.Split(*panel.Description, "\n") {
+			queryNames := []string{}
+
 			queryParts := strings.Split(part, "query=")
-			if len(queryParts) != 2 {
-				continue
+			if len(queryParts) == 2 {
+				queryNames = append(queryNames, queryParts[1])
 			}
-			queryName = queryParts[1]
+
+			for _, queryName := range queryNames {
+
+				var queryPath string
+				// support query name with and without .sql extension
+				if queryPath, _ = queries[queryName]; queryPath == "" {
+					if queryPath, _ = queries[fmt.Sprintf("%s.sql", queryName)]; queryPath == "" {
+						log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+						continue
+					}
+				}
+				queryBy, err := ioutil.ReadFile(queryPath)
+				if err != nil {
+					return err
+				}
+
+				// TODO(dm): support multiple targets?
+				targets := panel.GetTargets()
+				if targets != nil && len(*targets) > 0 {
+					t := *targets
+					for i, _ := range t {
+						t[i].RawSql = string(queryBy)
+					}
+
+				}
+				log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
+			}
+
 		}
 		if queryName == "" {
 			continue
 		}
 
-		var queryPath string
-		// support query name with and without .sql extension
-		if queryPath, _ = queries[queryName]; queryPath == "" {
-			if queryPath, _ = queries[fmt.Sprintf("%s.sql", queryName)]; queryPath == "" {
-				log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-				continue
-			}
-		}
-		queryBy, err := ioutil.ReadFile(queryPath)
-		if err != nil {
-			return err
-		}
-
-		// TODO(dm): support multiple targets?
-		targets := panel.GetTargets()
-		if targets != nil && len(*targets) > 0 {
-			t := *targets
-			t[0].RawSql = string(queryBy)
-		}
-		log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
 	}
 
 	params := sdk.SetDashboardParams{
