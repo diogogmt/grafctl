@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -39,12 +38,17 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		queriesDirAbs = filepath.Join(wd, queriesDir)
 	}
 
-	queries := map[string]string{}
+	queries := map[string]*Query{}
 	if err := filepath.Walk(queriesDir, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
-		queries[strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")] = path
+
+		if filepath.Ext(path) == ".sql" || filepath.Ext(path) == ".promql" {
+			queryPath := strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")
+			queries[queryPath] = NewQueryFromFile(queryPath)
+		}
+
 		return nil
 	}); err != nil {
 		return err
@@ -74,36 +78,38 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 				queryNames = append(queryNames, queryParts[1])
 			}
 
-			for _, queryName := range queryNames {
-
-				var queryPath string
-				// support query name with and without .sql extension
-				if queryPath, _ = queries[queryName]; queryPath == "" {
-					if queryPath, _ = queries[fmt.Sprintf("%s.sql", queryName)]; queryPath == "" {
-						log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-						continue
-					}
-				}
-				queryBy, err := ioutil.ReadFile(queryPath)
-				if err != nil {
-					return err
-				}
-
-				// TODO(dm): support multiple targets?
-				targets := panel.GetTargets()
-				if targets != nil && len(*targets) > 0 {
-					t := *targets
-					for i, _ := range t {
-						t[i].RawSql = string(queryBy)
+			// TODO(dm): support multiple targets?
+			targets := panel.GetTargets()
+			if targets == nil {
+				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+			} else if len(*targets) == 0 {
+				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+			} else {
+				t := *targets
+				for i, queryName := range queryNames {
+					var query *Query
+					// support query name with and without .sql extension
+					if query, ok = queries[queryName]; !ok == "" {
+						if query, ok = queries[fmt.Sprintf("%s.sql", queryName)]; !ok {
+							if query, ok = queries[fmt.Sprintf("%s.promql", queryName)]; !ok {
+								log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+								continue
+							}
+						}
 					}
 
+					if i < len(t) {
+						switch query.Type {
+						case SQL:
+							t[i].RawSql = query.Raw
+						case Prometheus:
+							t[i].Expr = query.Raw
+
+						log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
+					}
 				}
-				log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
 			}
 
-		}
-		if queryName == "" {
-			continue
 		}
 
 	}
