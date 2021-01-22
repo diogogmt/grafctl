@@ -82,36 +82,37 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			targets := panel.GetTargets()
 			if targets == nil {
 				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+				continue
 			} else if len(*targets) == 0 {
 				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
-			} else {
-				t := *targets
-				for i, queryName := range queryNames {
-					var query *Query
-					// support query name with and without .sql extension
-					if query, ok = queries[queryName]; !ok == "" {
-						if query, ok = queries[fmt.Sprintf("%s.sql", queryName)]; !ok {
-							if query, ok = queries[fmt.Sprintf("%s.promql", queryName)]; !ok {
-								log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-								continue
-							}
+				continue
+			}
+
+			t := *targets
+			for i, queryName := range queryNames {
+				var query *Query
+				// support query name with and without .sql extension
+				if query, ok = queries[queryName]; !ok == "" {
+					if query, ok = queries[fmt.Sprintf("%s.sql", queryName)]; !ok {
+						if query, ok = queries[fmt.Sprintf("%s.promql", queryName)]; !ok {
+							log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+							continue
 						}
 					}
+				}
 
-					if i < len(t) {
-						switch query.Type {
-						case SQL:
-							t[i].RawSql = query.Raw
-						case Prometheus:
-							t[i].Expr = query.Raw
+				if i < len(t) {
+					switch query.Type {
+					case SQL:
+						t[i].RawSql = query.Raw
+					case Prometheus:
+						t[i].Expr = query.Raw
 
 						log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
 					}
 				}
 			}
-
 		}
-
 	}
 
 	params := sdk.SetDashboardParams{
