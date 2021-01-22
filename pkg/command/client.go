@@ -105,10 +105,10 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 					switch query.Type {
 					case SQL:
 						t[i].RawSql = query.Raw
+						log.Printf("[%s:%s] query[%d] %s", i, panel.Type, panel.Title, queryName)
 					case Prometheus:
 						t[i].Expr = query.Raw
-
-						log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
+						log.Printf("[%s:%s] query[%d] %s", i, panel.Type, panel.Title, queryName)
 					}
 				}
 			}

@@ -18,6 +18,7 @@ type Query struct {
 	Type QueryType
 }
 
+
 func NewQueryFromFile(filePath string) (*Query, error) {
 	rawQuery, err := ioutil.ReadFile(filePath)
 	if err != nil {
