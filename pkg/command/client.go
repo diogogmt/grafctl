@@ -73,41 +73,37 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			continue
 		}
 
-		for _, part := range strings.Split(*panel.Description, "\n") {
-			queryNames := []string{}
+		targets := panel.GetTargets()
+		if targets == nil {
+			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+			continue
+		} else if len(*targets) == 0 {
+			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+			continue
+		}
 
+		for i, part := range strings.Split(*panel.Description, "\n") {
+			queryName := ""
 			queryParts := strings.Split(part, "query=")
 			if len(queryParts) == 2 {
-				queryNames = append(queryNames, queryParts[1])
-			}
-
-			// TODO(dm): support multiple targets?
-			targets := panel.GetTargets()
-			if targets == nil {
-				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
-				continue
-			} else if len(*targets) == 0 {
-				log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
-				continue
+				queryName = queryParts[1]
 			}
 
 			t := *targets
-			for i, queryName := range queryNames {
-				q := queries.Get(queryName)
-				if q == nil {
-					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-					continue
-				}
+			q := queries.Get(queryName)
+			if q == nil {
+				log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+				continue
+			}
 
-				if i < len(t) {
-					switch q.Type {
-					case SQL:
-						t[i].RawSql = q.Raw
-						log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
-					case Prometheus:
-						t[i].Expr = q.Raw
-						log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
-					}
+			if i < len(t) {
+				switch q.Type {
+				case SQL:
+					t[i].RawSql = q.Raw
+					log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
+				case Prometheus:
+					t[i].Expr = q.Raw
+					log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
 				}
 			}
 		}
