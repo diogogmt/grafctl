@@ -93,21 +93,20 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 
 			t := *targets
 			for i, queryName := range queryNames {
-				var query *Query
-				query = queries.Get(queryName)
-				if query == nil {
+				q := queries.Get(queryName)
+				if q == nil {
 					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
 					continue
 				}
 
 				if i < len(t) {
-					switch query.Type {
+					switch q.Type {
 					case SQL:
-						t[i].RawSql = query.Raw
-						log.Printf("[%s:%s] query[%d] %s", i, panel.Type, panel.Title, queryName)
+						t[i].RawSql = q.Raw
+						log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
 					case Prometheus:
-						t[i].Expr = query.Raw
-						log.Printf("[%s:%s] query[%d] %s", i, panel.Type, panel.Title, queryName)
+						t[i].Expr = q.Raw
+						log.Printf("[%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
 					}
 				}
 			}
