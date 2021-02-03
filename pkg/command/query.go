@@ -18,7 +18,6 @@ type Query struct {
 	Type QueryType
 }
 
-
 func NewQueryFromFile(filePath string) (*Query, error) {
 	rawQuery, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -27,18 +26,17 @@ func NewQueryFromFile(filePath string) (*Query, error) {
 
 	if strings.HasSuffix(filePath, ".sql") {
 		return &Query{
-			Raw: string(queryBy)
-			Type: SQL
-		}
+			Raw:  string(rawQuery),
+			Type: SQL,
+		}, nil
 	}
 
-	if strings.HasSuffix((filePath, ".promql")) {
+	if strings.HasSuffix(filePath, ".promql") {
 		return &Query{
-			Raw: string(queryBy)
-			Type: Prometheus
-		}
+			Raw:  string(rawQuery),
+			Type: Prometheus,
+		}, nil
 	}
 
-
-	return nil, fmt.Errorf("File: %s is not supported.", filePath)
+	return nil, fmt.Errorf("file: %s is not supported", filePath)
 }

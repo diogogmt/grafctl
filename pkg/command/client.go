@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		queriesDirAbs = filepath.Join(wd, queriesDir)
 	}
 
-	queries := map[string]*Query{}
+	queries := QueryManager{}
 	if err := filepath.Walk(queriesDir, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
@@ -91,14 +90,10 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			t := *targets
 			for i, queryName := range queryNames {
 				var query *Query
-				// support query name with and without .sql extension
-				if query, ok = queries[queryName]; !ok == "" {
-					if query, ok = queries[fmt.Sprintf("%s.sql", queryName)]; !ok {
-						if query, ok = queries[fmt.Sprintf("%s.promql", queryName)]; !ok {
-							log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-							continue
-						}
-					}
+				query = queries.Get(queryName)
+				if query == nil {
+					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+					continue
 				}
 
 				if i < len(t) {
