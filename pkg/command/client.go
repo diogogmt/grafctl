@@ -44,13 +44,12 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		}
 
 		if filepath.Ext(path) == ".sql" || filepath.Ext(path) == ".promql" {
-			queryPath := strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")
 			query, err := NewQueryFromFile(path)
 			if err != nil {
-
+				log.Printf("NewQueryFromFile: %s", err)
 				return err
 			}
-			queries[queryPath] = query
+			queries[strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")] = query
 		}
 
 		return nil
