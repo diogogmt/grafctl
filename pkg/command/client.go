@@ -2,8 +2,6 @@ package command
 
 import (
 	"context"
-	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -30,21 +28,23 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		return err
 	}
 
-	queriesDirAbs := queriesDir
-	if !filepath.IsAbs(queriesDir) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		queriesDirAbs = filepath.Join(wd, queriesDir)
+	queryManager, err := NewQueryManager(queriesDir)
+	if err != nil {
+		return err
 	}
 
-	queries := map[string]string{}
 	if err := filepath.Walk(queriesDir, func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() || filepath.Ext(path) != ".sql" {
+		if info.IsDir() {
 			return nil
 		}
-		queries[strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")] = path
+
+		if queryManager.SupportedQueryFile(path) {
+			err := queryManager.Put(path)
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}); err != nil {
 		return err
@@ -65,38 +65,55 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		if panel.Description == nil {
 			continue
 		}
-		queryName := ""
-		for _, part := range strings.Split(*panel.Description, "\n") {
-			queryParts := strings.Split(part, "query=")
-			if len(queryParts) != 2 {
-				continue
-			}
-			queryName = queryParts[1]
-		}
-		if queryName == "" {
+
+		targets := panel.GetTargets()
+		if targets == nil {
+			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
 			continue
 		}
 
-		var queryPath string
-		// support query name with and without .sql extension
-		if queryPath, _ = queries[queryName]; queryPath == "" {
-			if queryPath, _ = queries[fmt.Sprintf("%s.sql", queryName)]; queryPath == "" {
-				log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-				continue
+		queries := []*Query{}
+		for _, part := range strings.Split(*panel.Description, "\n") {
+			queryParts := strings.Split(part, "query=")
+			if len(queryParts) == 2 {
+				queryName := queryParts[1]
+				query := queryManager.Get(queryName)
+				if query == nil {
+					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+					continue
+				}
+				queries = append(queries, query)
 			}
-		}
-		queryBy, err := ioutil.ReadFile(queryPath)
-		if err != nil {
-			return err
+
 		}
 
-		// TODO(dm): support multiple targets?
-		targets := panel.GetTargets()
-		if targets != nil && len(*targets) > 0 {
-			t := *targets
-			t[0].RawSql = string(queryBy)
+		for i, query := range queries {
+			t := *panel.GetTargets()
+
+			if i < len(t) {
+				switch query.Type {
+				case SQL:
+					t[i].RawSql = query.Raw
+					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
+				case Prometheus:
+					t[i].Expr = query.Raw
+					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
+				}
+			} else {
+				switch query.Type {
+				case SQL:
+					panel.AddTarget(&sdk.Target{
+						RawSql: query.Raw,
+					})
+					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
+				case Prometheus:
+					panel.AddTarget(&sdk.Target{
+						Expr: query.Raw,
+					})
+					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
+				}
+			}
 		}
-		log.Printf("[%s:%s] query %s", panel.Type, panel.Title, queryName)
 	}
 
 	params := sdk.SetDashboardParams{
