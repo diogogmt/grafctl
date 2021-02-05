@@ -28,23 +28,18 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		return err
 	}
 
-	queriesDirAbs := queriesDir
-	if !filepath.IsAbs(queriesDir) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		queriesDirAbs = filepath.Join(wd, queriesDir)
+	queryManager, err := NewQueryManager(queriesDir)
+	if err != nil {
+		return err
 	}
 
-	queries := QueryManager{}
 	if err := filepath.Walk(queriesDir, func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() {
 			return nil
 		}
 
-		if queries.SupportedQueryFile(path) {
-			err := queries.Put(path, queriesDirAbs)
+		if queryManager.SupportedQueryFile(path) {
+			err := queryManager.Put(path)
 			if err != nil {
 				return err
 			}
@@ -77,41 +72,45 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			continue
 		}
 
-		for i, part := range strings.Split(*panel.Description, "\n") {
-			queryName := ""
+		queries := []*Query{}
+		for _, part := range strings.Split(*panel.Description, "\n") {
 			queryParts := strings.Split(part, "query=")
 			if len(queryParts) == 2 {
-				queryName = queryParts[1]
+				queryName := queryParts[1]
+				query := queryManager.Get(queryName)
+				if query == nil {
+					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
+					continue
+				}
+				queries = append(queries, query)
 			}
 
+		}
+
+		for i, query := range queries {
 			t := *panel.GetTargets()
-			q := queries.Get(queryName)
-			if q == nil {
-				log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-				continue
-			}
 
 			if i < len(t) {
-				switch q.Type {
+				switch query.Type {
 				case SQL:
-					t[i].RawSql = q.Raw
-					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
+					t[i].RawSql = query.Raw
+					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
 				case Prometheus:
-					t[i].Expr = q.Raw
-					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
+					t[i].Expr = query.Raw
+					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
 				}
 			} else {
-				switch q.Type {
+				switch query.Type {
 				case SQL:
 					panel.AddTarget(&sdk.Target{
-						RawSql: q.Raw,
+						RawSql: query.Raw,
 					})
-					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
+					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
 				case Prometheus:
 					panel.AddTarget(&sdk.Target{
-						Expr: q.Raw,
+						Expr: query.Raw,
 					})
-					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, queryName)
+					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
 				}
 			}
 		}
