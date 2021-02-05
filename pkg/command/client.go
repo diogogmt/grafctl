@@ -43,13 +43,11 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			return nil
 		}
 
-		if filepath.Ext(path) == ".sql" || filepath.Ext(path) == ".promql" {
-			query, err := NewQueryFromFile(path)
+		if queries.SupportedQueryFile(path) {
+			err := queries.Put(path, queriesDirAbs)
 			if err != nil {
-				log.Printf("NewQueryFromFile: %s", err)
 				return err
 			}
-			queries[strings.TrimLeft(strings.ReplaceAll(path, queriesDirAbs, ""), "/")] = query
 		}
 
 		return nil
@@ -77,9 +75,6 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		if targets == nil {
 			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
 			continue
-		} else if len(*targets) == 0 {
-			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
-			continue
 		}
 
 		for i, part := range strings.Split(*panel.Description, "\n") {
@@ -97,6 +92,7 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			}
 
 			if i < len(t) {
+				log.Printf("target %+v \n", t[i])
 				switch q.Type {
 				case SQL:
 					t[i].RawSql = q.Raw
