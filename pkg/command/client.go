@@ -67,7 +67,7 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		}
 
 		targets := panel.GetTargets()
-		if targets == nil || (targets != nil && len(*targets) == 0) {
+		if targets == nil {
 			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
 			continue
 		}
