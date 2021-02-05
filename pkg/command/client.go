@@ -92,7 +92,6 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 			}
 
 			if i < len(t) {
-				log.Printf("target %+v \n", t[i])
 				switch q.Type {
 				case SQL:
 					t[i].RawSql = q.Raw
