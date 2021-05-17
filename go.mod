@@ -1,6 +1,6 @@
 module github.com/diogogmt/grafctl
 
-go 1.15
+go 1.16
 
 require (
 	cloud.google.com/go/storage v1.12.0
@@ -9,4 +9,4 @@ require (
 	github.com/peterbourgon/ff/v2 v2.0.0
 )
 
-// replace github.com/grafana-tools/sdk => /Users/diogo/proj/sandbox/grafana-sdk
+replace github.com/grafana-tools/sdk v0.0.0-20210107173053-d7dc7721321b => github.com/diogogmt/sdk v0.0.0-20210517181929-4c823444ef11
