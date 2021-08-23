@@ -48,6 +48,8 @@ func NewRootCmd(opts ...RootConfigOption) *RootCmd {
 		Exec:       cmd.Exec,
 		Subcommands: []*ffcli.Command{
 			NewDashboardCmd(&conf).Command,
+			NewBackupCmd(&conf).Command,
+			NewImportCmd(&conf).Command,
 		},
 	}
 

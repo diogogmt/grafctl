@@ -1,24 +1,149 @@
 package command
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"cloud.google.com/go/storage"
+	"github.com/diogogmt/grafctl/pkg/utils"
 	"github.com/grafana-tools/sdk"
 )
 
+type BackupProvider string
+
+var (
+	GCSBackupProvider   = BackupProvider("gcs")
+	LocalBackupProvider = BackupProvider("local")
+)
+
+type GrafanaBackup struct {
+	Dashboards  []BoardBackup    `json:"dashboards"`
+	Datasources []sdk.Datasource `json:"datasources"`
+	Folders     []sdk.Folder     `json:"folders"`
+}
+
+type BoardBackup struct {
+	Dashboard sdk.Board           `json:"dashboard"`
+	Meta      sdk.BoardProperties `json:"meta"`
+}
+
 type Client struct {
 	*sdk.Client
+	apiURL string
+	apiKey string
 }
 
 func NewClient(apiURL string, apiKey string) *Client {
-	// TODO(dm): validate URL and client
 	return &Client{
 		Client: sdk.NewClient(apiURL, apiKey, sdk.DefaultHTTPClient),
+		apiURL: apiURL,
+		apiKey: apiKey,
 	}
+}
+
+func (c *Client) BackupGrafana(ctx context.Context, provider BackupProvider, dest string) error {
+	var gcsBucket *storage.BucketHandle
+	switch provider {
+	case GCSBackupProvider:
+		if dest == "" {
+			return fmt.Errorf("missing bucket location")
+		}
+		gcsClient, err := storage.NewClient(ctx)
+		if err != nil {
+			return err
+		}
+		gcsBucket = gcsClient.Bucket(dest)
+		if _, err := gcsBucket.Attrs(ctx); err != nil {
+			return fmt.Errorf("error getting bucket %q attributes: %s", dest, err)
+		}
+
+	case LocalBackupProvider:
+		// nop
+	default:
+		return fmt.Errorf("provider %q not supported", provider)
+	}
+
+	grafanaBackup := GrafanaBackup{}
+
+	// backup dashboards
+	foundBoards, err := c.SearchDashboards(ctx, "", false)
+	if err != nil {
+		return err
+	}
+	for _, foundBoard := range foundBoards {
+		board, boardMeta, err := c.GetDashboardByUID(ctx, foundBoard.UID)
+		if err != nil {
+			return err
+		}
+		grafanaBackup.Dashboards = append(grafanaBackup.Dashboards, BoardBackup{
+			Dashboard: board,
+			Meta:      boardMeta,
+		})
+	}
+
+	// backup datasources
+	datasources, err := c.GetAllDatasources(ctx)
+	if err != nil {
+		return err
+	}
+	grafanaBackup.Datasources = datasources
+
+	// backup folders
+	folders, err := c.GetAllFolders(ctx)
+	if err != nil {
+		return err
+	}
+	grafanaBackup.Folders = folders
+
+	u, err := url.Parse(c.apiURL)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	backupName := fmt.Sprintf("%s-%s-%d.json.gz", strings.ReplaceAll(u.Host, ".", "_"), now.Format("2006-01-02"), now.UnixNano())
+
+	backupBy, err := json.Marshal(grafanaBackup)
+	if err != nil {
+		return err
+	}
+
+	backupGzippedBy, err := utils.Gzip(ctx, backupBy)
+	if err != nil {
+		return err
+	}
+	switch provider {
+	case GCSBackupProvider:
+		ctx, cancel := context.WithTimeout(ctx, time.Second*15)
+		defer cancel()
+		objectWriter := gcsBucket.Object(backupName).NewWriter(ctx)
+		if _, err = io.Copy(objectWriter, bytes.NewReader(backupGzippedBy)); err != nil {
+			return err
+		}
+		if err := objectWriter.Close(); err != nil {
+			return err
+		}
+		fmt.Printf("gs://%s/%s\n", dest, backupName)
+	case LocalBackupProvider:
+		p := filepath.Join(dest, backupName)
+		if err := os.WriteFile(p, backupGzippedBy, 0644); err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", p)
+	default:
+		return fmt.Errorf("provider %q not supported", provider)
+	}
+
+	return nil
 }
 
 func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir string) error {
