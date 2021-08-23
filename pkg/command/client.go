@@ -132,13 +132,11 @@ func (c *Client) BackupGrafana(ctx context.Context, provider BackupProvider, des
 		if err := objectWriter.Close(); err != nil {
 			return err
 		}
-		fmt.Printf("gs://%s/%s\n", dest, backupName)
 	case LocalBackupProvider:
 		p := filepath.Join(dest, backupName)
 		if err := os.WriteFile(p, backupGzippedBy, 0644); err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", p)
 	default:
 		return fmt.Errorf("provider %q not supported", provider)
 	}

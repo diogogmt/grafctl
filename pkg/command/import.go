@@ -140,11 +140,11 @@ func (c *ImportCmd) Exec(ctx context.Context, args []string) error {
 		log.Printf("importing datasource %s", datasource.Name)
 		if _, err := c.Conf.Client().GetDatasource(ctx, datasource.ID); err == nil {
 			if _, err := c.Conf.Client().UpdateDatasource(ctx, datasource); err != nil {
-				return fmt.Errorf("UpdateDatasource %s %s: %w", datasource.ID, datasource.Name, err)
+				return fmt.Errorf("UpdateDatasource %d %s: %w", datasource.ID, datasource.Name, err)
 			}
 		} else {
 			if _, err := c.Conf.Client().CreateDatasource(ctx, datasource); err != nil {
-				return fmt.Errorf("CreateDatasource %s %s: %w", datasource.ID, datasource.Name, err)
+				return fmt.Errorf("CreateDatasource %d %s: %w", datasource.ID, datasource.Name, err)
 			}
 		}
 	}
