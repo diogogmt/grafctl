@@ -36,7 +36,7 @@ func NewDashboardSyncCmd(dashConf *DashboardConfig) *DashboardSyncCmd {
 
 	cmd.Command = &ffcli.Command{
 		Name:        "sync",
-		ShortUsage:  "grafc dash sync",
+		ShortUsage:  "grafctl dash sync",
 		ShortHelp:   "sync grafana dashboards",
 		FlagSet:     fs,
 		Exec:        cmd.Exec,

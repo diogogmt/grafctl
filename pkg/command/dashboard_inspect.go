@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 
@@ -36,7 +35,7 @@ func NewDashboardInspectCmd(dashConf *DashboardConfig) *DashboardInspectCmd {
 
 	cmd.Command = &ffcli.Command{
 		Name:        "inspect",
-		ShortUsage:  "grafc dash inspect",
+		ShortUsage:  "grafctl dash inspect",
 		ShortHelp:   "Inspect grafana dashboard",
 		FlagSet:     fs,
 		Exec:        cmd.Exec,
@@ -52,15 +51,16 @@ func (c *DashboardInspectCmd) RegisterFlags(fs *flag.FlagSet) {
 
 // Exec executes the dashboard ls command
 func (c *DashboardInspectCmd) Exec(ctx context.Context, args []string) error {
-	board, _, err := c.Conf.Client().GetDashboardByUID(ctx, c.Conf.UID)
+	dashboard, err := c.Conf.Client().GetDashboardByUID(ctx, c.Conf.UID)
 	if err != nil {
 		return err
 	}
-	boardBy, err := json.MarshalIndent(board, "", "\t")
+
+	dashBy, err := dashboard.Dashboard.EncodePretty()
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s\n", string(boardBy))
+	fmt.Printf("%s\n", string(dashBy))
 
 	return nil
 }

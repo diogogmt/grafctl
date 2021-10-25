@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"flag"
+	"log"
 
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
@@ -15,7 +16,7 @@ type RootConfig struct {
 }
 
 func (c *RootConfig) Client() *Client {
-	return NewClient(c.APIURL, c.APIKey)
+	return NewClient(c.APIURL, c.APIKey, c.Verbose)
 }
 
 // RootCmd wraps the  config and a ffcli.Command
@@ -69,4 +70,11 @@ func (c *RootCmd) RegisterFlags(fs *flag.FlagSet) {
 func (c *RootCmd) Exec(ctx context.Context, args []string) error {
 	c.FlagSet.Usage()
 	return nil
+}
+
+func (c *RootConfig) logd(format string, args ...interface{}) {
+	if !c.Verbose {
+		return
+	}
+	log.Printf(format, args...)
 }

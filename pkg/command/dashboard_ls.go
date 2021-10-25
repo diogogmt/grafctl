@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/diogogmt/grafctl/pkg/grafsdk"
 	"github.com/olekukonko/tablewriter"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
@@ -37,7 +38,7 @@ func NewDashboardLsCmd(dashConf *DashboardConfig) *DashboardLsCmd {
 
 	cmd.Command = &ffcli.Command{
 		Name:        "ls",
-		ShortUsage:  "grafc dash ls",
+		ShortUsage:  "grafctl dash ls",
 		ShortHelp:   "List grafana dashboards",
 		FlagSet:     fs,
 		Exec:        cmd.Exec,
@@ -53,7 +54,7 @@ func (c *DashboardLsCmd) RegisterFlags(fs *flag.FlagSet) {
 
 // Exec executes the dashboard ls command
 func (c *DashboardLsCmd) Exec(ctx context.Context, args []string) error {
-	boards, err := c.Conf.Client().SearchDashboards(ctx, "", false)
+	dashboards, err := c.Conf.Client().Search(ctx, grafsdk.DashTypeSearchOption())
 	if err != nil {
 		return err
 	}
@@ -61,8 +62,8 @@ func (c *DashboardLsCmd) Exec(ctx context.Context, args []string) error {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"UID", "Folder", "Title", "URL"})
 
-	for _, board := range boards {
-		table.Append([]string{board.UID, board.FolderTitle, board.Title, fmt.Sprintf("%s/%s", c.Conf.APIURL, board.URL)})
+	for _, dashboard := range dashboards {
+		table.Append([]string{dashboard.UID, dashboard.FolderTitle, dashboard.Title, fmt.Sprintf("%s/%s", c.Conf.APIURL, dashboard.URL)})
 	}
 	table.Render()
 

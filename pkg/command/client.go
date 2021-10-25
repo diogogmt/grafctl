@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/diogogmt/grafctl/pkg/grafsdk"
+	"github.com/diogogmt/grafctl/pkg/simplejson"
 	"github.com/diogogmt/grafctl/pkg/utils"
-	"github.com/grafana-tools/sdk"
 )
 
 type BackupProvider string
@@ -26,27 +27,24 @@ var (
 )
 
 type GrafanaBackup struct {
-	Dashboards  []BoardBackup    `json:"dashboards"`
-	Datasources []sdk.Datasource `json:"datasources"`
-	Folders     []sdk.Folder     `json:"folders"`
-}
-
-type BoardBackup struct {
-	Dashboard sdk.Board           `json:"dashboard"`
-	Meta      sdk.BoardProperties `json:"meta"`
+	Datasources []*grafsdk.Datasource        `json:"datasources"`
+	Folders     []*grafsdk.Folder            `json:"folders"`
+	Dashboards  []*grafsdk.DashboardWithMeta `json:"dashboards"`
 }
 
 type Client struct {
-	*sdk.Client
-	apiURL string
-	apiKey string
+	*grafsdk.Client
+	apiURL  string
+	apiKey  string
+	verbose bool
 }
 
-func NewClient(apiURL string, apiKey string) *Client {
+func NewClient(apiURL string, apiKey string, verbose bool) *Client {
 	return &Client{
-		Client: sdk.NewClient(apiURL, apiKey, sdk.DefaultHTTPClient),
-		apiURL: apiURL,
-		apiKey: apiKey,
+		Client:  grafsdk.New(apiURL, apiKey),
+		apiURL:  apiURL,
+		apiKey:  apiKey,
+		verbose: verbose,
 	}
 }
 
@@ -73,36 +71,30 @@ func (c *Client) BackupGrafana(ctx context.Context, provider BackupProvider, des
 	}
 
 	grafanaBackup := GrafanaBackup{}
+	var err error
+
+	// backup datasources
+	if grafanaBackup.Datasources, err = c.ListDatasources(ctx); err != nil {
+		return err
+	}
+
+	// backup folders
+	if grafanaBackup.Folders, err = c.ListFolders(ctx); err != nil {
+		return err
+	}
 
 	// backup dashboards
-	foundBoards, err := c.SearchDashboards(ctx, "", false)
+	dashSearchResults, err := c.Search(ctx, grafsdk.DashTypeSearchOption())
 	if err != nil {
 		return err
 	}
-	for _, foundBoard := range foundBoards {
-		board, boardMeta, err := c.GetDashboardByUID(ctx, foundBoard.UID)
+	for _, dashSearchResult := range dashSearchResults {
+		dashboard, err := c.GetDashboardByUID(ctx, dashSearchResult.UID)
 		if err != nil {
 			return err
 		}
-		grafanaBackup.Dashboards = append(grafanaBackup.Dashboards, BoardBackup{
-			Dashboard: board,
-			Meta:      boardMeta,
-		})
+		grafanaBackup.Dashboards = append(grafanaBackup.Dashboards, dashboard)
 	}
-
-	// backup datasources
-	datasources, err := c.GetAllDatasources(ctx)
-	if err != nil {
-		return err
-	}
-	grafanaBackup.Datasources = datasources
-
-	// backup folders
-	folders, err := c.GetAllFolders(ctx)
-	if err != nil {
-		return err
-	}
-	grafanaBackup.Folders = folders
 
 	u, err := url.Parse(c.apiURL)
 	if err != nil {
@@ -146,7 +138,7 @@ func (c *Client) BackupGrafana(ctx context.Context, provider BackupProvider, des
 
 func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir string) error {
 	// TODO(dm): check if queriesDir exist, if not filepath.Walk panics
-	board, boardProps, err := c.GetDashboardByUID(ctx, uid)
+	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
 	if err != nil {
 		return err
 	}
@@ -173,81 +165,79 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 		return err
 	}
 
-	panels := []*sdk.Panel{}
-	for _, panel := range board.Panels {
-		if panel.RowPanel != nil {
-			for _, nestedPanel := range panel.RowPanel.Panels {
-				nestedPanel := nestedPanel
-				panels = append(panels, &nestedPanel)
+	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelBy)
+		if err := c.updatePanelTargets(queryManager, panel); err != nil {
+			return err
+		}
+		// older versions of row panels can have sub-panels
+		for _, subPanelBy := range panel.Get("panels").MustArray() {
+			if err := c.updatePanelTargets(queryManager, simplejson.NewFromAny(subPanelBy)); err != nil {
+				return err
 			}
 		}
-		panels = append(panels, panel)
 	}
 
-	for _, panel := range panels {
-		if panel.Description == nil {
+	if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
+		Dashboard: dashboardFull.Dashboard,
+		Overwrite: true,
+		FolderID:  dashboardFull.Meta.Get("folderId").MustInt64(),
+	}); err != nil {
+		return fmt.Errorf("SaveDashboard: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejson.Json) error {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	panelDesc := panel.Get("description").MustString()
+	if panelDesc == "" {
+		return nil
+	}
+	targetsBy := panel.Get("targets").MustArray()
+	if len(targetsBy) <= 0 {
+		c.logd("no targets found for panel %s:%q", panelType, panelTitle)
+		return nil
+	}
+
+	queries := []*Query{}
+	for _, part := range strings.Split(panelDesc, "\n") {
+		queryParts := strings.Split(part, "query=")
+		if len(queryParts) != 2 {
 			continue
 		}
-
-		targets := panel.GetTargets()
-		if targets == nil {
-			log.Printf("[%s:%s] panel has no targets found", panel.Type, panel.Title)
+		queryName := queryParts[1]
+		query := queryManager.Get(queryName)
+		if query == nil {
+			c.logd("[%s:%s] query %s not found", panelType, panelTitle, queryName)
 			continue
 		}
-
-		queries := []*Query{}
-		for _, part := range strings.Split(*panel.Description, "\n") {
-			queryParts := strings.Split(part, "query=")
-			if len(queryParts) == 2 {
-				queryName := queryParts[1]
-				query := queryManager.Get(queryName)
-				if query == nil {
-					log.Printf("[%s:%s] query %s not found", panel.Type, panel.Title, queryName)
-					continue
-				}
-				queries = append(queries, query)
-			}
-
-		}
-
-		for i, query := range queries {
-			t := *panel.GetTargets()
-
-			if i < len(t) {
-				switch query.Type {
-				case SQL:
-					t[i].RawSql = query.Raw
-					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
-				case Prometheus:
-					t[i].Expr = query.Raw
-					log.Printf("target updated: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
-				}
-			} else {
-				switch query.Type {
-				case SQL:
-					panel.AddTarget(&sdk.Target{
-						RawSql: query.Raw,
-					})
-					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
-				case Prometheus:
-					panel.AddTarget(&sdk.Target{
-						Expr: query.Raw,
-					})
-					log.Printf("target created: [%s:%s] query[%d] %s", panel.Type, panel.Title, i, query.Name)
-				}
-			}
-		}
+		queries = append(queries, query)
 	}
 
-	params := sdk.SetDashboardParams{
-		FolderID:  boardProps.FolderID,
-		Overwrite: false,
+	if len(targetsBy) != len(queries) {
+		c.logd("found %d query(s) but only has %d target(s)", len(queries), len(targetsBy))
+		return nil
 	}
-	board.Annotations = struct {
-		List []sdk.Annotation `json:"list"`
-	}{}
-	if _, err := c.SetDashboard(ctx, board, params); err != nil {
-		return err
+
+	for i, query := range queries {
+		target := simplejson.NewFromAny(targetsBy[i])
+		switch query.Type {
+		case SQL:
+			target.Set("rawSql", query.Raw)
+		case Prometheus:
+			target.Set("expr", query.Raw)
+		}
+		c.logd("target updated: [%s:%s] query[%d] %s", panelType, panelTitle, i, query.Name)
 	}
 	return nil
+}
+
+func (c *Client) logd(format string, args ...interface{}) {
+	if !c.verbose {
+		return
+	}
+	log.Printf(format, args...)
 }

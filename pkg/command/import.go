@@ -7,12 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 
 	"cloud.google.com/go/storage"
-	"github.com/grafana-tools/sdk"
+	"github.com/diogogmt/grafctl/pkg/grafsdk"
+	"github.com/diogogmt/grafctl/pkg/simplejson"
 	"github.com/peterbourgon/ff/v2/ffcli"
 )
 
@@ -43,7 +43,7 @@ func NewImportCmd(rootConf *RootConfig) *ImportCmd {
 
 	cmd.Command = &ffcli.Command{
 		Name:        "import",
-		ShortUsage:  "grafc import",
+		ShortUsage:  "grafctl import",
 		ShortHelp:   "Import grafana dashboards and datasources",
 		FlagSet:     fs,
 		Exec:        cmd.Exec,
@@ -78,22 +78,22 @@ func (c *ImportCmd) Exec(ctx context.Context, args []string) error {
 		objectName = parts[1]
 	}
 
-	log.Printf("reading backup from %q", c.Conf.Src)
+	c.Conf.logd("reading backup from %q", c.Conf.Src)
 
 	var backupReader io.ReadCloser
 	if bucketName != "" {
 		gcsClient, err := storage.NewClient(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("storage.NewClient: %w", err)
 		}
 		if backupReader, err = gcsClient.Bucket(bucketName).Object(objectName).NewReader(ctx); err != nil {
-			return err
+			return fmt.Errorf("Bucket.NewReader: %w", err)
 		}
 		defer backupReader.Close()
 	} else {
 		var err error
 		if backupReader, err = os.Open(c.Conf.Src); err != nil {
-			return err
+			return fmt.Errorf("os.Open: %w", err)
 		}
 	}
 
@@ -112,65 +112,92 @@ func (c *ImportCmd) Exec(ctx context.Context, args []string) error {
 
 	grafanaBackup := GrafanaBackup{}
 	if err := json.Unmarshal(backupBy, &grafanaBackup); err != nil {
-		return err
+		return fmt.Errorf("json.Unmarshal: %w", err)
 	}
 
-	log.Printf("found %d dashboard(s), %d datasource(s), and %d folder(s)", len(grafanaBackup.Dashboards), len(grafanaBackup.Datasources), len(grafanaBackup.Folders))
-
-	folderIDMap := map[string]int{}
-	// upsert folders
-	for _, folder := range grafanaBackup.Folders {
-		log.Printf("importing folder %s", folder.Title)
-		if _, err := c.Conf.Client().GetFolderByUID(ctx, folder.UID); err == nil {
-			folder.Overwrite = true
-			if folder, err = c.Conf.Client().UpdateFolderByUID(ctx, folder); err != nil {
-				return fmt.Errorf("UpdateFolderByUID %s %s: %w", folder.UID, folder.Title, err)
-			}
-		} else {
-			if folder, err = c.Conf.Client().CreateFolder(ctx, folder); err != nil {
-				return fmt.Errorf("CreateFolder %s %s: %w", folder.UID, folder.Title, err)
-			}
-		}
-		folderIDMap[folder.Title] = folder.ID
-	}
-	log.Printf("imported folders %v", folderIDMap)
+	c.Conf.logd("found %d datasource(s), %d folder(s), and %d dashboard(s)", len(grafanaBackup.Datasources), len(grafanaBackup.Folders), len(grafanaBackup.Dashboards))
 
 	// upsert datasources
 	for _, datasource := range grafanaBackup.Datasources {
-		log.Printf("importing datasource %s", datasource.Name)
-		if _, err := c.Conf.Client().GetDatasource(ctx, datasource.ID); err == nil {
-			if _, err := c.Conf.Client().UpdateDatasource(ctx, datasource); err != nil {
+		if existingDS, err := c.Conf.Client().GetDatasourceByName(ctx, datasource.Name); err == nil {
+			c.Conf.logd("datasource %d:%s:%s already exists, updating in place", datasource.ID, datasource.UID, datasource.Name)
+			datasource.ID = existingDS.ID
+			if err := c.Conf.Client().UpdateDatasource(ctx, datasource); err != nil {
 				return fmt.Errorf("UpdateDatasource %d %s: %w", datasource.ID, datasource.Name, err)
 			}
 		} else {
+			c.Conf.logd("datasource %d:%s:%s does not exist, creating new one", datasource.ID, datasource.UID, datasource.Name)
+			datasource.ID = 0
 			if _, err := c.Conf.Client().CreateDatasource(ctx, datasource); err != nil {
 				return fmt.Errorf("CreateDatasource %d %s: %w", datasource.ID, datasource.Name, err)
 			}
 		}
 	}
+	c.Conf.logd("imported datasources")
 
-	log.Printf("imported datasources")
-
-	// overwrite dashboards
-	for _, dashboardBackup := range grafanaBackup.Dashboards {
-		dashboard := dashboardBackup.Dashboard
-		dashboardMeta := dashboardBackup.Meta
-		folderID := folderIDMap[dashboardMeta.FolderTitle]
-
-		log.Printf("importing dashboard (%s)%s - folder %s %d", dashboard.UID, dashboard.Title, dashboardMeta.FolderTitle, folderID)
-
-		// TODO(dm): map the folders and datasources to the new IDs
-
-		dashboard.ID = 0
-		// TODO(dm): remove the hack once the SDK is patched, without it keeps appending new annotations to the dashboard
-		dashboard.Annotations = struct {
-			List []sdk.Annotation `json:"list"`
-		}{}
-		if _, err := c.Conf.Client().SetDashboard(ctx, dashboard, sdk.SetDashboardParams{
-			FolderID:  folderID,
-			Overwrite: true,
-		}); err != nil {
+	// populate the map with the title of all backup folders
+	folderTitleIDMap := map[string]int64{}
+	for _, backupFolder := range grafanaBackup.Folders {
+		folderTitleIDMap[backupFolder.Title] = 0
+	}
+	// assign the existing folder id to the title map
+	folders, err := c.Conf.Client().ListFolders(ctx)
+	if err != nil {
+		return err
+	}
+	for _, folder := range folders {
+		folderTitleIDMap[folder.Title] = folder.ID
+	}
+	// create folders that do not exist
+	for title, id := range folderTitleIDMap {
+		if id != 0 {
+			continue
+		}
+		c.Conf.logd("folder %s does not exist, creating new one", title)
+		folder, err := c.Conf.Client().CreateFolder(ctx, title)
+		if err != nil {
 			return err
+		}
+		folderTitleIDMap[title] = folder.ID
+	}
+
+	// create a map with the backup folder IDs and the new folder IDs
+	folderBackupIDMap := map[int64]int64{}
+	for _, backupFolder := range grafanaBackup.Folders {
+		folderBackupIDMap[backupFolder.ID] = folderTitleIDMap[backupFolder.Title]
+	}
+
+	// dashboards
+	for _, dashboardFull := range grafanaBackup.Dashboards {
+		dashboard := dashboardFull.Dashboard
+		dashboardMeta := dashboardFull.Meta
+		dashboard.Del("id") // delete references to numeric id
+		uid := dashboard.Get("uid").MustString()
+		title := dashboard.Get("title").MustString()
+		folderTitle := dashboardMeta.Get("folderTitle").MustString()
+		folderID := folderTitleIDMap[folderTitle]
+		c.Conf.logd("importing dashboard %s:%q from folder %d:%q", uid, title, folderID, folderTitle)
+		dashboard.Set("folderId", folderID)
+
+		// dashboard list panels have a reference to the numeric folder id
+		// we track the new folder id's in a map so we can update the panel references
+		for _, p := range dashboard.Get("panels").MustArray() {
+			panel := simplejson.NewFromAny(p)
+			if panel.Get("type").MustString() != "dashlist" {
+				continue
+			}
+			oldFolderID := panel.Get("folderId").MustInt64()
+			newFolderID := folderBackupIDMap[panel.Get("folderId").MustInt64()]
+			c.Conf.logd("updating dash list folder ID from %d do %d", oldFolderID, newFolderID)
+			panel.Set("folderId", newFolderID)
+		}
+
+		if err := c.Conf.Client().SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
+			Dashboard: dashboard,
+			Overwrite: true,
+			FolderID:  folderID,
+		}); err != nil {
+			return fmt.Errorf("SaveDashboard: %w", err)
 		}
 	}
 
