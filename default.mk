@@ -49,14 +49,6 @@ vet:
 staticcheck:
 	staticcheck $(shell go list ./...)
 
-.PHONY: vendor
-## vendor: updates vendored dependencies
-vendor:
-	rm -f vendor go.sum || :
-	go mod init || :
-	go mod tidy
-	go mod vendor
-
 
 ## help: prints this help message
 help:
