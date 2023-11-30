@@ -26,6 +26,10 @@ var (
 	LocalBackupProvider = BackupProvider("local")
 )
 
+const dataSourceTypePrometheus = "prometheus"
+const dataSourceTypeStackDriver = "stackdriver"
+const defaultMinStep = "10s"
+
 type GrafanaBackup struct {
 	Datasources []*grafsdk.Datasource        `json:"datasources"`
 	Folders     []*grafsdk.Folder            `json:"folders"`
@@ -193,6 +197,8 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
 	panelDesc := panel.Get("description").MustString()
+	datasource := panel.Get("datasource").Get("type").MustString()
+
 	if panelDesc == "" {
 		return nil
 	}
@@ -227,8 +233,32 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 		switch query.Type {
 		case SQL:
 			target.Set("rawSql", query.Raw)
-		case Prometheus:
-			target.Set("expr", query.Raw)
+		case PromQL:
+			switch datasource {
+			case dataSourceTypePrometheus:
+				target.Set("expr", query.Raw)
+			case dataSourceTypeStackDriver:
+				projectName, err := target.Get("promQLQuery").Get("projectName").String()
+				if err != nil {
+					return err
+				}
+				step, err := target.Get("promQLQuery").Get("step").String()
+				if err != nil {
+					return err
+				}
+
+				// Default values for min step on Grafana is 10s
+				if step == "" {
+					step = defaultMinStep
+				}
+
+				promqlQuery := grafsdk.PromQLQuery{
+					Expression:  query.Raw,
+					ProjectName: projectName,
+					Step:        step,
+				}
+				target.Set("promQLQuery", promqlQuery)
+			}
 		}
 		c.logd("target updated: [%s:%s] query[%d] %s", panelType, panelTitle, i, query.Name)
 	}
