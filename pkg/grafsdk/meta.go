@@ -76,3 +76,9 @@ type Datasource struct {
 	Version           int              `json:"version"`
 	ReadOnly          bool             `json:"readOnly"`
 }
+
+type PromQLQuery struct {
+	Expression  string `json:"expr"`
+	ProjectName string `json:"projectName"`
+	Step        string `json:"step"`
+}

@@ -12,7 +12,7 @@ type QueryType int
 
 const (
 	SQL = iota
-	Prometheus
+	PromQL
 )
 
 type Query struct {
@@ -84,7 +84,7 @@ func (q QueryManager) Put(file string) error {
 		query = Query{
 			Name: name,
 			Raw:  string(rawQuery),
-			Type: Prometheus,
+			Type: PromQL,
 		}
 	} else {
 		return fmt.Errorf("query file: %s is not supported", file)
