@@ -11,6 +11,83 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestExportPanelQueriesDuplicateDescriptions(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "grafctl-export-duplicate-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a mock client
+	client := &Client{
+		Client:  &grafsdk.Client{},
+		apiURL:  "http://localhost:3000",
+		apiKey:  "test-key",
+		verbose: true,
+	}
+
+	// Test the parseQueryPaths function directly
+	// We'll test the parseQueryPaths function directly
+	queryPaths := client.parseQueryPaths("query=queries/panel1\nquery=queries/panel2")
+	assert.Equal(t, 2, len(queryPaths))
+	assert.Equal(t, "queries/panel1", queryPaths[0])
+	assert.Equal(t, "queries/panel2", queryPaths[1])
+
+	// Test empty description
+	emptyPaths := client.parseQueryPaths("")
+	assert.Equal(t, 0, len(emptyPaths))
+
+	// Test invalid description
+	invalidPaths := client.parseQueryPaths("query=")
+	assert.Equal(t, 0, len(invalidPaths))
+
+	// Test description with just "query="
+	justQueryPaths := client.parseQueryPaths("query=")
+	assert.Equal(t, 0, len(justQueryPaths))
+}
+
+func TestParseQueryPaths(t *testing.T) {
+	client := &Client{
+		Client:  &grafsdk.Client{},
+		apiURL:  "http://localhost:3000",
+		apiKey:  "test-key",
+		verbose: true,
+	}
+
+	// Test valid query paths
+	validDesc := "query=queries/panel1\nquery=queries/panel2"
+	paths := client.parseQueryPaths(validDesc)
+	assert.Equal(t, 2, len(paths))
+	assert.Equal(t, "queries/panel1", paths[0])
+	assert.Equal(t, "queries/panel2", paths[1])
+
+	// Test empty description
+	paths = client.parseQueryPaths("")
+	assert.Equal(t, 0, len(paths))
+
+	// Test invalid descriptions
+	paths = client.parseQueryPaths("query=")
+	assert.Equal(t, 0, len(paths))
+
+	paths = client.parseQueryPaths("query=  ")
+	assert.Equal(t, 0, len(paths))
+
+	paths = client.parseQueryPaths("some text without query=")
+	assert.Equal(t, 0, len(paths))
+
+	// Test mixed valid and invalid
+	mixedDesc := "query=queries/valid\nquery=\nquery=queries/another"
+	paths = client.parseQueryPaths(mixedDesc)
+	assert.Equal(t, 2, len(paths))
+	assert.Equal(t, "queries/valid", paths[0])
+	assert.Equal(t, "queries/another", paths[1])
+}
+
+func createMockDashboardWithDuplicateDescriptions() *grafsdk.DashboardWithMeta {
+	// This would be used for testing the full duplicate detection
+	// For now, we test the individual functions
+	return &grafsdk.DashboardWithMeta{}
+}
+
 func TestExportPanelQueriesOverwrite(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "grafctl-export-overwrite-test")

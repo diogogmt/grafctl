@@ -277,7 +277,29 @@ func (c *Client) ExportDashboard(ctx context.Context, uid string, queriesDir str
 		return err
 	}
 
-	// Iterate through all panels and export their queries
+	// Track descriptions to detect duplicates
+	descriptionCounts := make(map[string]int)
+	descriptionPanels := make(map[string][]string)
+
+	// First pass: collect all descriptions and their panel info
+	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelBy)
+		c.collectPanelDescriptions(panel, descriptionCounts, descriptionPanels)
+		// Handle sub-panels in row panels (older versions)
+		for _, subPanelBy := range panel.Get("panels").MustArray() {
+			c.collectPanelDescriptions(simplejson.NewFromAny(subPanelBy), descriptionCounts, descriptionPanels)
+		}
+	}
+
+	// Log duplicate descriptions
+	for desc, count := range descriptionCounts {
+		if count > 1 {
+			panels := descriptionPanels[desc]
+			c.logd("found %d panels with same description '%s': %v", count, desc, panels)
+		}
+	}
+
+	// Second pass: export queries
 	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
 		panel := simplejson.NewFromAny(panelBy)
 		if err := c.exportPanelQueries(panel, queriesSubdir, overwrite); err != nil {
@@ -292,6 +314,48 @@ func (c *Client) ExportDashboard(ctx context.Context, uid string, queriesDir str
 	}
 
 	return nil
+}
+
+func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCounts map[string]int, descriptionPanels map[string][]string) {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	panelDesc := panel.Get("description").MustString()
+
+	if panelDesc == "" {
+		c.logd("panel %s:%q has empty description", panelType, panelTitle)
+		return
+	}
+
+	// Check if description is just "query=" or similar invalid format
+	queryPaths := c.parseQueryPaths(panelDesc)
+	if len(queryPaths) == 0 {
+		c.logd("panel %s:%q has invalid description format: %q", panelType, panelTitle, panelDesc)
+		return
+	}
+
+	// Track each query path
+	for _, queryPath := range queryPaths {
+		descriptionCounts[queryPath]++
+		panelInfo := fmt.Sprintf("%s:%s", panelType, panelTitle)
+		descriptionPanels[queryPath] = append(descriptionPanels[queryPath], panelInfo)
+	}
+}
+
+func (c *Client) parseQueryPaths(panelDesc string) []string {
+	queryPaths := []string{}
+	for _, part := range strings.Split(panelDesc, "\n") {
+		queryParts := strings.Split(part, "query=")
+		if len(queryParts) != 2 {
+			continue
+		}
+		queryPath := strings.TrimSpace(queryParts[1])
+		// Skip empty or invalid query paths
+		if queryPath == "" || queryPath == "query=" {
+			continue
+		}
+		queryPaths = append(queryPaths, queryPath)
+	}
+	return queryPaths
 }
 
 func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
@@ -312,13 +376,10 @@ func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, o
 	}
 
 	// Parse panel description to get query file paths
-	queryPaths := []string{}
-	for _, part := range strings.Split(panelDesc, "\n") {
-		queryParts := strings.Split(part, "query=")
-		if len(queryParts) != 2 {
-			continue
-		}
-		queryPaths = append(queryPaths, queryParts[1])
+	queryPaths := c.parseQueryPaths(panelDesc)
+	if len(queryPaths) == 0 {
+		c.logd("no valid query paths found for panel %s:%q (description: %q)", panelType, panelTitle, panelDesc)
+		return nil
 	}
 
 	if len(targetsBy) != len(queryPaths) {
