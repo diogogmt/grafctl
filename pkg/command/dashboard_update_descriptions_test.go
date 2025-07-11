@@ -16,15 +16,15 @@ func TestSanitizeTitle(t *testing.T) {
 		verbose: true,
 	}
 
-	// Test basic sanitization
-	assert.Equal(t, "my_dashboard", client.sanitizeTitle("My Dashboard"))
-	assert.Equal(t, "cpu_usage", client.sanitizeTitle("CPU Usage"))
-	assert.Equal(t, "api_requests_second", client.sanitizeTitle("API Requests/Second"))
-
+		// Test basic sanitization
+	assert.Equal(t, "my-dashboard", client.sanitizeTitle("My Dashboard"))
+	assert.Equal(t, "cpu-usage", client.sanitizeTitle("CPU Usage"))
+	assert.Equal(t, "api-requests-second", client.sanitizeTitle("API Requests/Second"))
+	
 	// Test special characters
-	assert.Equal(t, "test_panel", client.sanitizeTitle("Test Panel!"))
-	assert.Equal(t, "panel_123", client.sanitizeTitle("Panel 123"))
-	assert.Equal(t, "panel_with_dashes", client.sanitizeTitle("Panel-with-dashes"))
+	assert.Equal(t, "test-panel", client.sanitizeTitle("Test Panel!"))
+	assert.Equal(t, "panel-123", client.sanitizeTitle("Panel 123"))
+	assert.Equal(t, "panel-with-dashes", client.sanitizeTitle("Panel-with-dashes"))
 
 	// Test edge cases
 	assert.Equal(t, "untitled", client.sanitizeTitle(""))
@@ -60,17 +60,17 @@ func TestGeneratePanelDescription(t *testing.T) {
 		verbose: true,
 	}
 
-	// Test panel without row
+		// Test panel without row
 	desc := client.generatePanelDescription("My Dashboard", "", "table", "CPU Usage")
-	assert.Equal(t, "query=my_dashboard/table-cpu_usage", desc)
-
+	assert.Equal(t, "query=my-dashboard/table-cpu-usage", desc)
+	
 	// Test panel with row
 	desc = client.generatePanelDescription("My Dashboard", "System Metrics", "graph", "Memory Usage")
-	assert.Equal(t, "query=my_dashboard/system_metrics/graph-memory_usage", desc)
-
+	assert.Equal(t, "query=my-dashboard/system-metrics/graph-memory-usage", desc)
+	
 	// Test with special characters
 	desc = client.generatePanelDescription("API Dashboard", "Request Stats", "stat", "Requests/Second!")
-	assert.Equal(t, "query=api_dashboard/request_stats/stat-requests_second", desc)
+	assert.Equal(t, "query=api-dashboard/request-stats/stat-requests-second", desc)
 }
 
 func TestIsInvalidDescription(t *testing.T) {
@@ -114,7 +114,7 @@ func TestUpdatePanelDescription(t *testing.T) {
 
 	// Check that description was updated
 	newDesc := panel.Get("description").MustString()
-	assert.Equal(t, "query=my_dashboard/table-test_panel", newDesc)
+	assert.Equal(t, "query=my-dashboard/table-test-panel", newDesc)
 
 	// Test dry run
 	panel.Set("description", "") // Reset
