@@ -463,6 +463,8 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 		return fmt.Errorf("dashboard has no title")
 	}
 
+	c.logd("processing dashboard: %s (overwrite: %v, dryRun: %v)", dashboardTitle, overwrite, dryRun)
+
 	// Create backup if not dry run
 	if !dryRun {
 		backupName := fmt.Sprintf("backup-%s-%d.json", uid, time.Now().Unix())
@@ -479,6 +481,10 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 
 	panelsUpdated := 0
 	panelsSkipped := 0
+
+	// Get all panels
+	panels := dashboardFull.Dashboard.Get("panels").MustArray()
+	c.logd("found %d panels to process", len(panels))
 
 	// Process all panels
 	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
