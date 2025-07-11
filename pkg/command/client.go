@@ -465,20 +465,6 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 
 	c.logd("processing dashboard: %s (overwrite: %v, dryRun: %v)", dashboardTitle, overwrite, dryRun)
 
-	// Create backup if not dry run
-	if !dryRun {
-		backupName := fmt.Sprintf("backup-%s-%d.json", uid, time.Now().Unix())
-		backupPath := filepath.Join(".", backupName)
-		backupData, err := json.MarshalIndent(dashboardFull, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal backup: %w", err)
-		}
-		if err := os.WriteFile(backupPath, backupData, 0644); err != nil {
-			return fmt.Errorf("failed to write backup: %w", err)
-		}
-		c.logd("created backup: %s", backupPath)
-	}
-
 	panelsUpdated := 0
 	panelsSkipped := 0
 
@@ -486,10 +472,44 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 	panels := dashboardFull.Dashboard.Get("panels").MustArray()
 	c.logd("found %d panels to process", len(panels))
 
-	// Process all panels
-	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+	// First pass: collect row information
+	rowInfo := make(map[int]string) // panel ID -> row title
+	for _, panelBy := range panels {
 		panel := simplejson.NewFromAny(panelBy)
-		updated, skipped, err := c.updatePanelDescription(panel, dashboardTitle, "", overwrite, dryRun)
+		panelType := panel.Get("type").MustString()
+		if panelType == "row" {
+			rowTitle := panel.Get("title").MustString()
+			rowY := panel.Get("gridPos").Get("y").MustInt()
+
+			// Find all panels that belong to this row (panels with gridPos.y > rowY)
+			for _, otherPanelBy := range panels {
+				otherPanel := simplejson.NewFromAny(otherPanelBy)
+				otherPanelType := otherPanel.Get("type").MustString()
+				if otherPanelType != "row" {
+					otherPanelY := otherPanel.Get("gridPos").Get("y").MustInt()
+					if otherPanelY > rowY {
+						// This panel is below the row, so it belongs to this row
+						otherPanelID := otherPanel.Get("id").MustInt()
+						rowInfo[otherPanelID] = rowTitle
+					}
+				}
+			}
+		}
+	}
+
+	// Second pass: process all panels
+	for _, panelBy := range panels {
+		panel := simplejson.NewFromAny(panelBy)
+		panelType := panel.Get("type").MustString()
+		if panelType == "row" {
+			// Skip row panels themselves
+			continue
+		}
+
+		panelID := panel.Get("id").MustInt()
+		rowTitle := rowInfo[panelID]
+
+		updated, skipped, err := c.updatePanelDescription(panel, dashboardTitle, rowTitle, overwrite, dryRun)
 		if err != nil {
 			return err
 		}
@@ -498,22 +518,6 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 		}
 		if skipped {
 			panelsSkipped++
-		}
-
-		// Handle sub-panels in row panels
-		for _, subPanelBy := range panel.Get("panels").MustArray() {
-			subPanel := simplejson.NewFromAny(subPanelBy)
-			rowTitle := panel.Get("title").MustString()
-			updated, skipped, err := c.updatePanelDescription(subPanel, dashboardTitle, rowTitle, overwrite, dryRun)
-			if err != nil {
-				return err
-			}
-			if updated {
-				panelsUpdated++
-			}
-			if skipped {
-				panelsSkipped++
-			}
 		}
 	}
 
