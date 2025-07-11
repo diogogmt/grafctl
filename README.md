@@ -56,6 +56,7 @@ SUBCOMMANDS
   ls       List grafana dashboards
   inspect  Inspect grafana dashboard
   sync     sync grafana dashboards
+  export   export panel queries from grafana dashboard to filesystem
 ```
 
 ### Examples
@@ -69,6 +70,12 @@ $ grafctl -url {{grafana.url}} -key {{api-key}} import ./backup.json.gz
 
 # list dashboards
 $ grafctl -url {{grafana.url}} -key {{api-key}} dash ls
+
+# export panel queries from a dashboard
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash export -uid {{dashboard-uid}} -queries ./queries
+
+# export panel queries and overwrite existing files
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash export -uid {{dashboard-uid}} -queries ./queries -overwrite
 ```
 
 ## Contributing

@@ -40,6 +40,7 @@ func NewDashboardCmd(rootConf *RootConfig) *DashboardCmd {
 			NewDashboardLsCmd(&conf).Command,
 			NewDashboardInspectCmd(&conf).Command,
 			NewDashboardSyncCmd(&conf).Command,
+			NewDashboardExportCmd(&conf).Command,
 		},
 	}
 	return &cmd
