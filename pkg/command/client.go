@@ -598,12 +598,12 @@ func (c *Client) sanitizeTitle(title string) string {
 	// Convert to lowercase
 	title = strings.ToLower(title)
 
-	// Replace spaces and special characters with underscores
+	// Replace spaces and special characters with hyphens
 	reg := regexp.MustCompile(`[^a-z0-9]+`)
-	title = reg.ReplaceAllString(title, "_")
+	title = reg.ReplaceAllString(title, "-")
 
-	// Remove leading/trailing underscores
-	title = strings.Trim(title, "_")
+	// Remove leading/trailing hyphens
+	title = strings.Trim(title, "-")
 
 	// Ensure it's not empty
 	if title == "" {
