@@ -45,7 +45,7 @@ func TestGetPanelTypePrefix(t *testing.T) {
 	assert.Equal(t, "table", client.getPanelTypePrefix("table"))
 	assert.Equal(t, "graph", client.getPanelTypePrefix("graph"))
 	assert.Equal(t, "stat", client.getPanelTypePrefix("stat"))
-	assert.Equal(t, "timeseries", client.getPanelTypePrefix("timeseries"))
+	assert.Equal(t, "graph", client.getPanelTypePrefix("timeseries"))
 	assert.Equal(t, "heatmap", client.getPanelTypePrefix("heatmap"))
 
 	// Test unknown panel type

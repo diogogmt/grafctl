@@ -619,7 +619,7 @@ func (c *Client) getPanelTypePrefix(panelType string) string {
 		"table":      "table",
 		"graph":      "graph",
 		"stat":       "stat",
-		"timeseries": "timeseries",
+		"timeseries": "graph",
 		"heatmap":    "heatmap",
 		"barchart":   "barchart",
 		"piechart":   "piechart",
