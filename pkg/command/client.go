@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -449,6 +450,196 @@ func (c *Client) exportTargetToFile(target *simplejson.Json, datasource string, 
 	}
 
 	return nil
+}
+
+func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, overwrite bool, dryRun bool) error {
+	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
+	if err != nil {
+		return err
+	}
+
+	dashboardTitle := dashboardFull.Dashboard.Get("title").MustString()
+	if dashboardTitle == "" {
+		return fmt.Errorf("dashboard has no title")
+	}
+
+	// Create backup if not dry run
+	if !dryRun {
+		backupName := fmt.Sprintf("backup-%s-%d.json", uid, time.Now().Unix())
+		backupPath := filepath.Join(".", backupName)
+		backupData, err := json.MarshalIndent(dashboardFull, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal backup: %w", err)
+		}
+		if err := os.WriteFile(backupPath, backupData, 0644); err != nil {
+			return fmt.Errorf("failed to write backup: %w", err)
+		}
+		c.logd("created backup: %s", backupPath)
+	}
+
+	panelsUpdated := 0
+	panelsSkipped := 0
+
+	// Process all panels
+	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelBy)
+		updated, skipped, err := c.updatePanelDescription(panel, dashboardTitle, "", overwrite, dryRun)
+		if err != nil {
+			return err
+		}
+		if updated {
+			panelsUpdated++
+		}
+		if skipped {
+			panelsSkipped++
+		}
+
+		// Handle sub-panels in row panels
+		for _, subPanelBy := range panel.Get("panels").MustArray() {
+			subPanel := simplejson.NewFromAny(subPanelBy)
+			rowTitle := panel.Get("title").MustString()
+			updated, skipped, err := c.updatePanelDescription(subPanel, dashboardTitle, rowTitle, overwrite, dryRun)
+			if err != nil {
+				return err
+			}
+			if updated {
+				panelsUpdated++
+			}
+			if skipped {
+				panelsSkipped++
+			}
+		}
+	}
+
+	if dryRun {
+		c.logd("DRY RUN: would update %d panels, skip %d panels", panelsUpdated, panelsSkipped)
+	} else {
+		// Save the updated dashboard
+		if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
+			Dashboard: dashboardFull.Dashboard,
+			Overwrite: true,
+			FolderID:  dashboardFull.Meta.Get("folderId").MustInt64(),
+		}); err != nil {
+			return fmt.Errorf("SaveDashboard: %w", err)
+		}
+		c.logd("updated %d panels, skipped %d panels", panelsUpdated, panelsSkipped)
+	}
+
+	return nil
+}
+
+func (c *Client) updatePanelDescription(panel *simplejson.Json, dashboardTitle, rowTitle string, overwrite, dryRun bool) (bool, bool, error) {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	currentDesc := panel.Get("description").MustString()
+
+	// Check if we should update this panel
+	shouldUpdate := overwrite || c.isInvalidDescription(currentDesc)
+	if !shouldUpdate {
+		return false, true, nil
+	}
+
+	// Generate new description
+	newDesc := c.generatePanelDescription(dashboardTitle, rowTitle, panelType, panelTitle)
+	if newDesc == currentDesc {
+		return false, true, nil
+	}
+
+	// Update the panel description
+	if !dryRun {
+		panel.Set("description", newDesc)
+	}
+
+	action := "would update"
+	if !dryRun {
+		action = "updated"
+	}
+
+	if rowTitle != "" {
+		c.logd("%s panel description: [%s:%s] in row [%s] -> %s", action, panelType, panelTitle, rowTitle, newDesc)
+	} else {
+		c.logd("%s panel description: [%s:%s] -> %s", action, panelType, panelTitle, newDesc)
+	}
+
+	return true, false, nil
+}
+
+func (c *Client) isInvalidDescription(desc string) bool {
+	if desc == "" {
+		return true
+	}
+
+	// Check if description is just "query=" or similar invalid format
+	queryPaths := c.parseQueryPaths(desc)
+	return len(queryPaths) == 0
+}
+
+func (c *Client) generatePanelDescription(dashboardTitle, rowTitle, panelType, panelTitle string) string {
+	// Sanitize titles
+	sanitizedDashboardTitle := c.sanitizeTitle(dashboardTitle)
+	sanitizedPanelTitle := c.sanitizeTitle(panelTitle)
+
+	// Get prefix for panel type
+	prefix := c.getPanelTypePrefix(panelType)
+
+	// Build the path
+	var path string
+	if rowTitle != "" {
+		sanitizedRowTitle := c.sanitizeTitle(rowTitle)
+		path = fmt.Sprintf("%s/%s/%s-%s", sanitizedDashboardTitle, sanitizedRowTitle, prefix, sanitizedPanelTitle)
+	} else {
+		path = fmt.Sprintf("%s/%s-%s", sanitizedDashboardTitle, prefix, sanitizedPanelTitle)
+	}
+
+	return fmt.Sprintf("query=%s", path)
+}
+
+func (c *Client) sanitizeTitle(title string) string {
+	// Convert to lowercase
+	title = strings.ToLower(title)
+
+	// Replace spaces and special characters with underscores
+	reg := regexp.MustCompile(`[^a-z0-9]+`)
+	title = reg.ReplaceAllString(title, "_")
+
+	// Remove leading/trailing underscores
+	title = strings.Trim(title, "_")
+
+	// Ensure it's not empty
+	if title == "" {
+		title = "untitled"
+	}
+
+	return title
+}
+
+func (c *Client) getPanelTypePrefix(panelType string) string {
+	// Map panel types to prefixes
+	prefixMap := map[string]string{
+		"table":      "table",
+		"graph":      "graph",
+		"stat":       "stat",
+		"timeseries": "timeseries",
+		"heatmap":    "heatmap",
+		"barchart":   "barchart",
+		"piechart":   "piechart",
+		"gauge":      "gauge",
+		"singlestat": "singlestat",
+		"text":       "text",
+		"row":        "row",
+		"alertlist":  "alertlist",
+		"dashlist":   "dashlist",
+		"logs":       "logs",
+		"news":       "news",
+		"pluginlist": "pluginlist",
+	}
+
+	if prefix, exists := prefixMap[panelType]; exists {
+		return prefix
+	}
+
+	// Default prefix for unknown types
+	return "panel"
 }
 
 func (c *Client) logd(format string, args ...interface{}) {
