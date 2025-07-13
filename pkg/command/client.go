@@ -463,7 +463,10 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 		return fmt.Errorf("dashboard has no title")
 	}
 
-	c.logd("processing dashboard: %s (overwrite: %v, dryRun: %v)", dashboardTitle, overwrite, dryRun)
+	// Get folder title from metadata
+	folderTitle := dashboardFull.Meta.Get("folderTitle").MustString()
+
+	c.logd("processing dashboard: %s in folder: %s (overwrite: %v, dryRun: %v)", dashboardTitle, folderTitle, overwrite, dryRun)
 
 	panelsUpdated := 0
 	panelsSkipped := 0
@@ -472,52 +475,36 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 	panels := dashboardFull.Dashboard.Get("panels").MustArray()
 	c.logd("found %d panels to process", len(panels))
 
-	// First pass: collect row information
-	rowInfo := make(map[int]string) // panel ID -> row title
+	// Process all panels
 	for _, panelBy := range panels {
 		panel := simplejson.NewFromAny(panelBy)
 		panelType := panel.Get("type").MustString()
 		if panelType == "row" {
 			rowTitle := panel.Get("title").MustString()
-			rowY := panel.Get("gridPos").Get("y").MustInt()
-
-			// Find all panels that belong to this row (panels with gridPos.y > rowY)
-			for _, otherPanelBy := range panels {
-				otherPanel := simplejson.NewFromAny(otherPanelBy)
-				otherPanelType := otherPanel.Get("type").MustString()
-				if otherPanelType != "row" {
-					otherPanelY := otherPanel.Get("gridPos").Get("y").MustInt()
-					if otherPanelY > rowY {
-						// This panel is below the row, so it belongs to this row
-						otherPanelID := otherPanel.Get("id").MustInt()
-						rowInfo[otherPanelID] = rowTitle
-					}
+			for _, subPanelBy := range panel.Get("panels").MustArray() {
+				subPanel := simplejson.NewFromAny(subPanelBy)
+				updated, skipped, err := c.updatePanelDescription(subPanel, folderTitle, dashboardTitle, rowTitle, overwrite, dryRun)
+				if err != nil {
+					return err
+				}
+				if updated {
+					panelsUpdated++
+				}
+				if skipped {
+					panelsSkipped++
 				}
 			}
-		}
-	}
-
-	// Second pass: process all panels
-	for _, panelBy := range panels {
-		panel := simplejson.NewFromAny(panelBy)
-		panelType := panel.Get("type").MustString()
-		if panelType == "row" {
-			// Skip row panels themselves
-			continue
-		}
-
-		panelID := panel.Get("id").MustInt()
-		rowTitle := rowInfo[panelID]
-
-		updated, skipped, err := c.updatePanelDescription(panel, dashboardTitle, rowTitle, overwrite, dryRun)
-		if err != nil {
-			return err
-		}
-		if updated {
-			panelsUpdated++
-		}
-		if skipped {
-			panelsSkipped++
+		} else {
+			updated, skipped, err := c.updatePanelDescription(panel, folderTitle, dashboardTitle, "", overwrite, dryRun)
+			if err != nil {
+				return err
+			}
+			if updated {
+				panelsUpdated++
+			}
+			if skipped {
+				panelsSkipped++
+			}
 		}
 	}
 
@@ -538,7 +525,7 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 	return nil
 }
 
-func (c *Client) updatePanelDescription(panel *simplejson.Json, dashboardTitle, rowTitle string, overwrite, dryRun bool) (bool, bool, error) {
+func (c *Client) updatePanelDescription(panel *simplejson.Json, folderTitle, dashboardTitle, rowTitle string, overwrite, dryRun bool) (bool, bool, error) {
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
 	currentDesc := panel.Get("description").MustString()
@@ -550,7 +537,7 @@ func (c *Client) updatePanelDescription(panel *simplejson.Json, dashboardTitle, 
 	}
 
 	// Generate new description
-	newDesc := c.generatePanelDescription(dashboardTitle, rowTitle, panelType, panelTitle)
+	newDesc := c.generatePanelDescription(folderTitle, dashboardTitle, rowTitle, panelType, panelTitle)
 	if newDesc == currentDesc {
 		return false, true, nil
 	}
@@ -584,8 +571,9 @@ func (c *Client) isInvalidDescription(desc string) bool {
 	return len(queryPaths) == 0
 }
 
-func (c *Client) generatePanelDescription(dashboardTitle, rowTitle, panelType, panelTitle string) string {
+func (c *Client) generatePanelDescription(folderTitle, dashboardTitle, rowTitle, panelType, panelTitle string) string {
 	// Sanitize titles
+	sanitizedFolderTitle := c.sanitizeTitle(folderTitle)
 	sanitizedDashboardTitle := c.sanitizeTitle(dashboardTitle)
 	sanitizedPanelTitle := c.sanitizeTitle(panelTitle)
 
@@ -596,9 +584,9 @@ func (c *Client) generatePanelDescription(dashboardTitle, rowTitle, panelType, p
 	var path string
 	if rowTitle != "" {
 		sanitizedRowTitle := c.sanitizeTitle(rowTitle)
-		path = fmt.Sprintf("%s/%s/%s-%s", sanitizedDashboardTitle, sanitizedRowTitle, prefix, sanitizedPanelTitle)
+		path = fmt.Sprintf("%s/%s/%s/%s-%s", sanitizedFolderTitle, sanitizedDashboardTitle, sanitizedRowTitle, prefix, sanitizedPanelTitle)
 	} else {
-		path = fmt.Sprintf("%s/%s-%s", sanitizedDashboardTitle, prefix, sanitizedPanelTitle)
+		path = fmt.Sprintf("%s/%s/%s-%s", sanitizedFolderTitle, sanitizedDashboardTitle, prefix, sanitizedPanelTitle)
 	}
 
 	return fmt.Sprintf("query=%s", path)
