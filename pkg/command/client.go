@@ -343,6 +343,12 @@ func (c *Client) UpdateDashboardPanelsDescription(ctx context.Context, uid strin
 		c.logd("DRY RUN: would update %d panels, skip %d panels", panelsUpdated, panelsSkipped)
 		return nil
 	}
+
+	if panelsUpdated == 0 {
+		c.logd("no panels updated")
+		return nil
+	}
+
 	// Save the updated dashboard
 	if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
 		Dashboard: dashboardFull.Dashboard,
@@ -360,6 +366,11 @@ func (c *Client) updatePanelDescription(panel *simplejson.Json, folderTitle, das
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
 	currentDesc := panel.Get("description").MustString()
+
+	if panelType == "row" || panelType == "text" {
+		// Row and text panels can have empty descriptions
+		return false, true, nil
+	}
 
 	// Check if we should update this panel
 	shouldUpdate := overwrite || c.isInvalidDescription(currentDesc)
