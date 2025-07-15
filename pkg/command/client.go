@@ -265,6 +265,195 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 	return nil
 }
 
+func (c *Client) ExportDashboardQueries(ctx context.Context, uid string, queriesDir string, overwrite bool) error {
+	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
+	if err != nil {
+		return err
+	}
+
+	// Always create queries subdirectory
+	queriesSubdir := filepath.Join(queriesDir, "queries")
+	if err := os.MkdirAll(queriesSubdir, 0755); err != nil {
+		return err
+	}
+
+	// Track descriptions to detect duplicates
+	descriptionCounts := make(map[string]int)
+	descriptionPanels := make(map[string][]string)
+
+	// First pass: collect all descriptions and their panel info
+	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelBy)
+		c.collectPanelDescriptions(panel, descriptionCounts, descriptionPanels)
+		// Handle sub-panels in row panels (older versions)
+		for _, subPanelBy := range panel.Get("panels").MustArray() {
+			c.collectPanelDescriptions(simplejson.NewFromAny(subPanelBy), descriptionCounts, descriptionPanels)
+		}
+	}
+
+	// Log duplicate descriptions
+	for desc, count := range descriptionCounts {
+		if count > 1 {
+			panels := descriptionPanels[desc]
+			c.logd("found %d panels with same description '%s': %v", count, desc, panels)
+			return fmt.Errorf("found %d panels with same description '%s': %v", count, desc, panels)
+		}
+	}
+
+	// Second pass: export queries
+	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
+		panel := simplejson.NewFromAny(panelBy)
+		if err := c.exportPanelQueries(panel, queriesSubdir, overwrite); err != nil {
+			return err
+		}
+		// Handle sub-panels in row panels (older versions)
+		for _, subPanelBy := range panel.Get("panels").MustArray() {
+			if err := c.exportPanelQueries(simplejson.NewFromAny(subPanelBy), queriesSubdir, overwrite); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCounts map[string]int, descriptionPanels map[string][]string) {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	panelDesc := panel.Get("description").MustString()
+
+	if panelType == "row" {
+		// Row panels can have empty descriptions
+		return
+	}
+
+	if panelDesc == "" {
+		c.logd("panel %s:%q has empty description", panelType, panelTitle)
+		return
+	}
+
+	// Check if description is just "query=" or similar invalid format
+	queryPaths := c.parseQueryPaths(panelDesc)
+	if len(queryPaths) == 0 {
+		c.logd("panel %s:%q has invalid description format: %q", panelType, panelTitle, panelDesc)
+		return
+	}
+
+	// Track each query path
+	for _, queryPath := range queryPaths {
+		descriptionCounts[queryPath]++
+		panelInfo := fmt.Sprintf("%s:%s", panelType, panelTitle)
+		descriptionPanels[queryPath] = append(descriptionPanels[queryPath], panelInfo)
+	}
+}
+
+func (c *Client) parseQueryPaths(panelDesc string) []string {
+	queryPaths := []string{}
+	for _, part := range strings.Split(panelDesc, "\n") {
+		queryParts := strings.Split(part, "query=")
+		if len(queryParts) != 2 {
+			continue
+		}
+		queryPath := strings.TrimSpace(queryParts[1])
+		// Skip empty or invalid query paths
+		if queryPath == "" || queryPath == "query=" {
+			continue
+		}
+		queryPaths = append(queryPaths, queryPath)
+	}
+	return queryPaths
+}
+
+func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	panelDesc := panel.Get("description").MustString()
+	datasource := panel.Get("datasource").Get("type").MustString()
+
+	if panelType == "row" || panelType == "text" {
+		// Skip row and text panels
+		return nil
+	}
+
+	if panelDesc == "" {
+		c.logd("no description found for panel %s:%q", panelType, panelTitle)
+		return nil
+	}
+
+	targetsBy := panel.Get("targets").MustArray()
+	if len(targetsBy) <= 0 {
+		c.logd("no targets found for panel %s:%q", panelType, panelTitle)
+		return nil
+	}
+
+	// Parse panel description to get query file paths
+	queryPaths := c.parseQueryPaths(panelDesc)
+	if len(queryPaths) == 0 {
+		c.logd("no valid query paths found for panel %s:%q (description: %q)", panelType, panelTitle, panelDesc)
+		return nil
+	}
+
+	if len(targetsBy) != len(queryPaths) {
+		c.logd("found %d query path(s) but only has %d target(s) for panel %s:%q", len(queryPaths), len(targetsBy), panelType, panelTitle)
+		return nil
+	}
+
+	// Export each target to its corresponding query file
+	for i, queryPath := range queryPaths {
+		target := simplejson.NewFromAny(targetsBy[i])
+		if err := c.exportTargetToFile(target, datasource, queryPath, queriesDir, overwrite); err != nil {
+			return err
+		}
+		c.logd("query exported: [%s:%s] query[%d] %s", panelType, panelTitle, i, queryPath)
+	}
+
+	return nil
+}
+
+func (c *Client) exportTargetToFile(target *simplejson.Json, datasource string, queryPath string, queriesDir string, overwrite bool) error {
+	var queryContent string
+	var fileExtension string
+
+	switch datasource {
+	case dataSourceTypePrometheus, dataSourceTypeStackDriver:
+		queryContent = target.Get("expr").MustString()
+		fileExtension = ".promql"
+	default:
+		// Treat all other datasources as SQL
+		queryContent = target.Get("rawSql").MustString()
+		fileExtension = ".sql"
+	}
+
+	if queryContent == "" {
+		c.logd("no query content found for datasource %s (path: %s, extension: %s)", datasource, queryPath, fileExtension)
+		return nil
+	}
+
+	// Always write to queries subdirectory
+	fullPath := filepath.Join(queriesDir, queryPath+fileExtension)
+
+	// Check if file exists and skip if overwrite is false
+	if !overwrite {
+		if _, err := os.Stat(fullPath); err == nil {
+			c.logd("skipping existing file: %s", fullPath)
+			return nil
+		}
+	}
+
+	// Create directory if it doesn't exist
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Write the query to file
+	if err := os.WriteFile(fullPath, []byte(queryContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *Client) logd(format string, args ...interface{}) {
 	if !c.verbose {
 		return
