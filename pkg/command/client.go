@@ -296,6 +296,7 @@ func (c *Client) ExportDashboardQueries(ctx context.Context, uid string, queries
 		if count > 1 {
 			panels := descriptionPanels[desc]
 			c.logd("found %d panels with same description '%s': %v", count, desc, panels)
+			return fmt.Errorf("found %d panels with same description '%s': %v", count, desc, panels)
 		}
 	}
 
