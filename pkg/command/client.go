@@ -322,6 +322,11 @@ func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCou
 	panelTitle := panel.Get("title").MustString()
 	panelDesc := panel.Get("description").MustString()
 
+	if panelType == "row" {
+		// Row panels can have empty descriptions
+		return
+	}
+
 	if panelDesc == "" {
 		c.logd("panel %s:%q has empty description", panelType, panelTitle)
 		return
