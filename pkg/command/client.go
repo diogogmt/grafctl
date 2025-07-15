@@ -370,6 +370,11 @@ func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, o
 	panelDesc := panel.Get("description").MustString()
 	datasource := panel.Get("datasource").Get("type").MustString()
 
+	if panelType == "row" || panelType == "text" {
+		// Skip row and text panels
+		return nil
+	}
+
 	if panelDesc == "" {
 		c.logd("no description found for panel %s:%q", panelType, panelTitle)
 		return nil
