@@ -265,7 +265,7 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 	return nil
 }
 
-func (c *Client) ExportDashboard(ctx context.Context, uid string, queriesDir string, overwrite bool) error {
+func (c *Client) ExportDashboardQueries(ctx context.Context, uid string, queriesDir string, overwrite bool) error {
 	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
 	if err != nil {
 		return err
@@ -404,16 +404,8 @@ func (c *Client) exportTargetToFile(target *simplejson.Json, datasource string, 
 	var fileExtension string
 
 	switch datasource {
-	case dataSourceTypePrometheus:
+	case dataSourceTypePrometheus, dataSourceTypeStackDriver:
 		queryContent = target.Get("expr").MustString()
-		fileExtension = ".promql"
-	case dataSourceTypeStackDriver:
-		promqlQuery := target.Get("promQLQuery")
-		if promqlQuery != nil {
-			queryContent = promqlQuery.Get("expr").MustString()
-		} else {
-			queryContent = target.Get("expr").MustString()
-		}
 		fileExtension = ".promql"
 	default:
 		// Treat all other datasources as SQL
