@@ -56,7 +56,7 @@ SUBCOMMANDS
   ls       List grafana dashboards
   inspect  Inspect grafana dashboard
   sync     sync grafana dashboards
-  update-descriptions  update panel descriptions with proper query paths
+  update-panels-descriptions  update panel descriptions with proper query paths
 ```
 
 ### Examples

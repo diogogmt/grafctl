@@ -283,7 +283,7 @@ func (c *Client) parseQueryPaths(panelDesc string) []string {
 	return queryPaths
 }
 
-func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, overwrite bool, dryRun bool) error {
+func (c *Client) UpdateDashboardPanelsDescription(ctx context.Context, uid string, overwrite bool, dryRun bool) error {
 	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
 	if err != nil {
 		return err
@@ -341,17 +341,17 @@ func (c *Client) UpdateDashboardDescriptions(ctx context.Context, uid string, ov
 
 	if dryRun {
 		c.logd("DRY RUN: would update %d panels, skip %d panels", panelsUpdated, panelsSkipped)
-	} else {
-		// Save the updated dashboard
-		if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
-			Dashboard: dashboardFull.Dashboard,
-			Overwrite: true,
-			FolderID:  dashboardFull.Meta.Get("folderId").MustInt64(),
-		}); err != nil {
-			return fmt.Errorf("SaveDashboard: %w", err)
-		}
-		c.logd("updated %d panels, skipped %d panels", panelsUpdated, panelsSkipped)
+		return nil
 	}
+	// Save the updated dashboard
+	if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
+		Dashboard: dashboardFull.Dashboard,
+		Overwrite: true,
+		FolderID:  dashboardFull.Meta.Get("folderId").MustInt64(),
+	}); err != nil {
+		return fmt.Errorf("SaveDashboard: %w", err)
+	}
+	c.logd("updated %d panels, skipped %d panels", panelsUpdated, panelsSkipped)
 
 	return nil
 }
@@ -374,12 +374,9 @@ func (c *Client) updatePanelDescription(panel *simplejson.Json, folderTitle, das
 	}
 
 	// Update the panel description
-	if !dryRun {
-		panel.Set("description", newDesc)
-	}
-
 	action := "would update"
 	if !dryRun {
+		panel.Set("description", newDesc)
 		action = "updated"
 	}
 
@@ -443,32 +440,11 @@ func (c *Client) sanitizeTitle(title string) string {
 }
 
 func (c *Client) getPanelTypePrefix(panelType string) string {
-	// Map panel types to prefixes
-	prefixMap := map[string]string{
-		"table":      "table",
-		"graph":      "graph",
-		"stat":       "stat",
-		"timeseries": "graph",
-		"heatmap":    "heatmap",
-		"barchart":   "barchart",
-		"piechart":   "piechart",
-		"gauge":      "gauge",
-		"singlestat": "singlestat",
-		"text":       "text",
-		"row":        "row",
-		"alertlist":  "alertlist",
-		"dashlist":   "dashlist",
-		"logs":       "logs",
-		"news":       "news",
-		"pluginlist": "pluginlist",
+	// TODO: remove this once we have a way to remove unused query files. Keeping it for now to avoid creating new files for existing dashboards.
+	if panelType == "timeseries" {
+		panelType = "graph"
 	}
-
-	if prefix, exists := prefixMap[panelType]; exists {
-		return prefix
-	}
-
-	// Default prefix for unknown types
-	return "panel"
+	return panelType
 }
 
 func (c *Client) logd(format string, args ...interface{}) {
