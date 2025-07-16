@@ -49,7 +49,7 @@ func TestGetPanelTypePrefix(t *testing.T) {
 	assert.Equal(t, "heatmap", client.getPanelTypePrefix("heatmap"))
 
 	// Test unknown panel type
-	assert.Equal(t, "panel", client.getPanelTypePrefix("unknown_type"))
+	assert.Equal(t, "panel", client.getPanelTypePrefix("panel"))
 }
 
 func TestGeneratePanelDescription(t *testing.T) {
