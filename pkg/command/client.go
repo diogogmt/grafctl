@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -347,23 +348,6 @@ func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCou
 	}
 }
 
-func (c *Client) parseQueryPaths(panelDesc string) []string {
-	queryPaths := []string{}
-	for _, part := range strings.Split(panelDesc, "\n") {
-		queryParts := strings.Split(part, "query=")
-		if len(queryParts) != 2 {
-			continue
-		}
-		queryPath := strings.TrimSpace(queryParts[1])
-		// Skip empty or invalid query paths
-		if queryPath == "" || queryPath == "query=" {
-			continue
-		}
-		queryPaths = append(queryPaths, queryPath)
-	}
-	return queryPaths
-}
-
 func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
@@ -452,6 +436,198 @@ func (c *Client) exportTargetToFile(target *simplejson.Json, datasource string, 
 	}
 
 	return nil
+}
+
+func (c *Client) UpdateDashboardPanelsDescription(ctx context.Context, uid string, overwrite bool, dryRun bool) error {
+	dashboardFull, err := c.GetDashboardByUID(ctx, uid)
+	if err != nil {
+		return err
+	}
+
+	dashboardTitle := dashboardFull.Dashboard.Get("title").MustString()
+	if dashboardTitle == "" {
+		return fmt.Errorf("dashboard has no title")
+	}
+
+	// Get folder title from metadata
+	folderTitle := dashboardFull.Meta.Get("folderTitle").MustString()
+
+	c.logd("processing dashboard: %s in folder: %s (overwrite: %v, dryRun: %v)", dashboardTitle, folderTitle, overwrite, dryRun)
+
+	panelsUpdated := 0
+	panelsSkipped := 0
+
+	// Get all panels
+	panels := dashboardFull.Dashboard.Get("panels").MustArray()
+	c.logd("found %d panels to process", len(panels))
+
+	// Process all panels
+	for _, panelBy := range panels {
+		panel := simplejson.NewFromAny(panelBy)
+		panelType := panel.Get("type").MustString()
+		if panelType == "row" {
+			rowTitle := panel.Get("title").MustString()
+			for _, subPanelBy := range panel.Get("panels").MustArray() {
+				subPanel := simplejson.NewFromAny(subPanelBy)
+				updated, skipped, err := c.updatePanelDescription(subPanel, folderTitle, dashboardTitle, rowTitle, overwrite, dryRun)
+				if err != nil {
+					return err
+				}
+				if updated {
+					panelsUpdated++
+				}
+				if skipped {
+					panelsSkipped++
+				}
+			}
+		} else {
+			updated, skipped, err := c.updatePanelDescription(panel, folderTitle, dashboardTitle, "", overwrite, dryRun)
+			if err != nil {
+				return err
+			}
+			if updated {
+				panelsUpdated++
+			}
+			if skipped {
+				panelsSkipped++
+			}
+		}
+	}
+
+	if dryRun {
+		c.logd("DRY RUN: would update %d panels, skip %d panels", panelsUpdated, panelsSkipped)
+		return nil
+	}
+
+	if panelsUpdated == 0 {
+		c.logd("no panels updated")
+		return nil
+	}
+
+	// Save the updated dashboard
+	if err := c.SaveDashboard(ctx, &grafsdk.DashboardSavePayload{
+		Dashboard: dashboardFull.Dashboard,
+		Overwrite: true,
+		FolderID:  dashboardFull.Meta.Get("folderId").MustInt64(),
+	}); err != nil {
+		return fmt.Errorf("SaveDashboard: %w", err)
+	}
+	c.logd("updated %d panels, skipped %d panels", panelsUpdated, panelsSkipped)
+
+	return nil
+}
+
+func (c *Client) updatePanelDescription(panel *simplejson.Json, folderTitle, dashboardTitle, rowTitle string, overwrite, dryRun bool) (bool, bool, error) {
+	panelType := panel.Get("type").MustString()
+	panelTitle := panel.Get("title").MustString()
+	currentDesc := panel.Get("description").MustString()
+
+	if panelType == "row" || panelType == "text" {
+		// Row and text panels can have empty descriptions
+		return false, true, nil
+	}
+
+	// Check if we should update this panel
+	shouldUpdate := overwrite || c.isInvalidDescription(currentDesc)
+	if !shouldUpdate {
+		return false, true, nil
+	}
+
+	// Generate new description
+	newDesc := c.generatePanelDescription(folderTitle, dashboardTitle, rowTitle, panelType, panelTitle)
+	if newDesc == currentDesc {
+		return false, true, nil
+	}
+
+	// Update the panel description
+	action := "would update"
+	if !dryRun {
+		panel.Set("description", newDesc)
+		action = "updated"
+	}
+
+	if rowTitle != "" {
+		c.logd("%s panel description: [%s:%s] in row [%s] -> %s", action, panelType, panelTitle, rowTitle, newDesc)
+	} else {
+		c.logd("%s panel description: [%s:%s] -> %s", action, panelType, panelTitle, newDesc)
+	}
+
+	return true, false, nil
+}
+
+func (c *Client) isInvalidDescription(desc string) bool {
+	if desc == "" {
+		return true
+	}
+
+	// Check if description is just "query=" or similar invalid format
+	queryPaths := c.parseQueryPaths(desc)
+	return len(queryPaths) == 0
+}
+
+func (c *Client) parseQueryPaths(panelDesc string) []string {
+	queryPaths := []string{}
+	for _, part := range strings.Split(panelDesc, "\n") {
+		queryParts := strings.Split(part, "query=")
+		if len(queryParts) != 2 {
+			continue
+		}
+		queryPath := strings.TrimSpace(queryParts[1])
+		// Skip empty or invalid query paths
+		if queryPath == "" || queryPath == "query=" {
+			continue
+		}
+		queryPaths = append(queryPaths, queryPath)
+	}
+	return queryPaths
+}
+
+func (c *Client) generatePanelDescription(folderTitle, dashboardTitle, rowTitle, panelType, panelTitle string) string {
+	// Sanitize titles
+	sanitizedFolderTitle := c.sanitizeTitle(folderTitle)
+	sanitizedDashboardTitle := c.sanitizeTitle(dashboardTitle)
+	sanitizedPanelTitle := c.sanitizeTitle(panelTitle)
+
+	// Get prefix for panel type
+	prefix := c.getPanelTypePrefix(panelType)
+
+	// Build the path
+	var path string
+	if rowTitle != "" {
+		sanitizedRowTitle := c.sanitizeTitle(rowTitle)
+		path = fmt.Sprintf("%s/%s/%s/%s-%s", sanitizedFolderTitle, sanitizedDashboardTitle, sanitizedRowTitle, prefix, sanitizedPanelTitle)
+	} else {
+		path = fmt.Sprintf("%s/%s/%s-%s", sanitizedFolderTitle, sanitizedDashboardTitle, prefix, sanitizedPanelTitle)
+	}
+
+	return fmt.Sprintf("query=%s", path)
+}
+
+func (c *Client) sanitizeTitle(title string) string {
+	// Convert to lowercase
+	title = strings.ToLower(title)
+
+	// Replace spaces and special characters with hyphens
+	reg := regexp.MustCompile(`[^a-z0-9]+`)
+	title = reg.ReplaceAllString(title, "-")
+
+	// Remove leading/trailing hyphens
+	title = strings.Trim(title, "-")
+
+	// Ensure it's not empty
+	if title == "" {
+		title = "untitled"
+	}
+
+	return title
+}
+
+func (c *Client) getPanelTypePrefix(panelType string) string {
+	// TODO: remove this once we have a way to remove unused query files. Keeping it for now to avoid creating new files for existing dashboards.
+	if panelType == "timeseries" {
+		panelType = "graph"
+	}
+	return panelType
 }
 
 func (c *Client) logd(format string, args ...interface{}) {

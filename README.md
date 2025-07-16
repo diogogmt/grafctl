@@ -56,6 +56,7 @@ SUBCOMMANDS
   ls       List grafana dashboards
   inspect  Inspect grafana dashboard
   sync     sync grafana dashboards
+  update-panels-descriptions  update panel descriptions with proper query paths
   export-queries   export panel queries from grafana dashboard to filesystem
 ```
 
@@ -71,6 +72,38 @@ $ grafctl -url {{grafana.url}} -key {{api-key}} import ./backup.json.gz
 # list dashboards
 $ grafctl -url {{grafana.url}} -key {{api-key}} dash ls
 
+# update panel descriptions to include folder, dashboard, row, and panel info
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash update-descriptions -uid {{dashboard-uid}}
+
+# preview changes (dry run)
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash update-descriptions -uid {{dashboard-uid}} -dry-run
+
+# update all panels, not just those with invalid descriptions
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash update-descriptions -uid {{dashboard-uid}} -overwrite
+```
+
+#### update-descriptions command
+
+Automatically updates all panel descriptions in a dashboard to a standardized format:
+
+- With row: `query=<folder-title>/<dashboard-title>/<row-title>/<prefix>-<panel-title>`
+- Without row: `query=<folder-title>/<dashboard-title>/<prefix>-<panel-title>`
+
+**Options:**
+- `-uid` (required): Dashboard UID
+- `-overwrite`: Update all panels, not just those with invalid descriptions
+- `-dry-run`: Preview changes without updating the dashboard
+
+**Description path segments:**
+- Folder title (dashlist/folder)
+- Dashboard title
+- Row title (if applicable)
+- Panel type prefix (e.g., graph, table, stat, etc.)
+- Panel title (all segments are kebab-case)
+
+**Example:**
+```
+query=business-metrics/animation-rate/countries-metrics/graph-viewable-impressions-tiers
 # export panel queries from a dashboard
 $ grafctl -url {{grafana.url}} -key {{api-key}} dash export-queries -uid {{dashboard-uid}} -out ./queries
 
