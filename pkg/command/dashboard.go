@@ -41,6 +41,7 @@ func NewDashboardCmd(rootConf *RootConfig) *DashboardCmd {
 			NewDashboardInspectCmd(&conf).Command,
 			NewDashboardSyncCmd(&conf).Command,
 			NewDashboardUpdatePanelsDescriptionsCmd(&conf).Command,
+			NewDashboardExportQueriesCmd(&conf).Command,
 		},
 	}
 	return &cmd

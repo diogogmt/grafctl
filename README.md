@@ -1,18 +1,18 @@
 # grafctl
+
 Manage grafana via the CLI
 
 [![GoDoc](https://img.shields.io/badge/godoc-reference-5272B4.svg?style=for-the-badge)](https://godoc.org/github.com/diogogmt/grafctl)
 
-
 - [grafctl](#grafctl)
   - [Installation](#installation)
-      - [Binary](#binary)
-      - [Go](#go)
-      - [Homebrew](#homebrew)
+    - [Binary](#binary)
+    - [Go](#go)
+    - [Homebrew](#homebrew)
   - [Usage](#usage)
     - [Examples](#examples)
   - [Contributing](#contributing)
-      - [Makefile](#makefile)
+    - [Makefile](#makefile)
 
 ## Installation
 
@@ -57,6 +57,7 @@ SUBCOMMANDS
   inspect  Inspect grafana dashboard
   sync     sync grafana dashboards
   update-panels-descriptions  update panel descriptions with proper query paths
+  export-queries   export panel queries from grafana dashboard to filesystem
 ```
 
 ### Examples
@@ -103,6 +104,11 @@ Automatically updates all panel descriptions in a dashboard to a standardized fo
 **Example:**
 ```
 query=business-metrics/animation-rate/countries-metrics/graph-viewable-impressions-tiers
+# export panel queries from a dashboard
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash export-queries -uid {{dashboard-uid}} -out ./queries
+
+# export panel queries and overwrite existing files
+$ grafctl -url {{grafana.url}} -key {{api-key}} dash export-queries -uid {{dashboard-uid}} -out ./queries -overwrite
 ```
 
 ## Contributing
