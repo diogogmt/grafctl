@@ -1,7 +1,6 @@
 package command
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,39 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestExportPanelQueriesDuplicateDescriptions(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "grafctl-export-duplicate-test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	// Create a mock client
-	client := &Client{
-		Client:  &grafsdk.Client{},
-		apiURL:  "http://localhost:3000",
-		apiKey:  "test-key",
-		verbose: true,
-	}
-
-	// Test the parseQueryPaths function directly
-	// We'll test the parseQueryPaths function directly
-	queryPaths := client.parseQueryPaths("query=queries/panel1\nquery=queries/panel2")
-	assert.Equal(t, 2, len(queryPaths))
-	assert.Equal(t, "queries/panel1", queryPaths[0])
-	assert.Equal(t, "queries/panel2", queryPaths[1])
-
-	// Test empty description
-	emptyPaths := client.parseQueryPaths("")
-	assert.Equal(t, 0, len(emptyPaths))
-
-	// Test invalid description
-	invalidPaths := client.parseQueryPaths("query=")
-	assert.Equal(t, 0, len(invalidPaths))
-
-	// Test description with just "query="
-	justQueryPaths := client.parseQueryPaths("query=")
-	assert.Equal(t, 0, len(justQueryPaths))
-}
+// This test was redundant with TestParseQueryPaths - removed
 
 func TestParseQueryPaths(t *testing.T) {
 	client := &Client{
@@ -82,12 +49,6 @@ func TestParseQueryPaths(t *testing.T) {
 	assert.Equal(t, "queries/another", paths[1])
 }
 
-func createMockDashboardWithDuplicateDescriptions() *grafsdk.DashboardWithMeta {
-	// This would be used for testing the full duplicate detection
-	// For now, we test the individual functions
-	return &grafsdk.DashboardWithMeta{}
-}
-
 func TestExportPanelQueriesOverwrite(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "grafctl-export-overwrite-test")
@@ -114,7 +75,7 @@ func TestExportPanelQueriesOverwrite(t *testing.T) {
 
 	// Test SQL panel with overwrite=false (should skip existing file)
 	sqlPanel := createMockSQLPanel()
-	err = client.exportPanelQueries(sqlPanel, tempDir, false)
+	err = client.ExportPanelQueries(sqlPanel, tempDir, false)
 	assert.NoError(t, err)
 
 	// Verify the existing file was not overwritten
@@ -123,7 +84,7 @@ func TestExportPanelQueriesOverwrite(t *testing.T) {
 	assert.Equal(t, "EXISTING CONTENT", string(content))
 
 	// Test SQL panel with overwrite=true (should overwrite existing file)
-	err = client.exportPanelQueries(sqlPanel, tempDir, true)
+	err = client.ExportPanelQueries(sqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify the file was overwritten
@@ -132,9 +93,9 @@ func TestExportPanelQueriesOverwrite(t *testing.T) {
 	assert.Equal(t, "SELECT * FROM test_table", string(content))
 }
 
-func TestExportPanelQueries(t *testing.T) {
+func TestExportPanelQueriesSingleTarget(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "grafctl-export-test")
+	tempDir, err := os.MkdirTemp("", "grafctl-export-single-test")
 	assert.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
@@ -146,12 +107,12 @@ func TestExportPanelQueries(t *testing.T) {
 		verbose: true,
 	}
 
-	// Test SQL panel
+	// Test SQL panel (single target)
 	sqlPanel := createMockSQLPanel()
-	err = client.exportPanelQueries(sqlPanel, tempDir, true)
+	err = client.ExportPanelQueries(sqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
-	// Verify SQL file was created
+	// Verify SQL file was created without refId suffix (single target)
 	sqlPath := filepath.Join(tempDir, "queries", "panel1.sql")
 	_, err = os.Stat(sqlPath)
 	assert.NoError(t, err)
@@ -160,12 +121,12 @@ func TestExportPanelQueries(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "SELECT * FROM test_table", string(sqlContent))
 
-	// Test PromQL panel
+	// Test PromQL panel (single target)
 	promqlPanel := createMockPromQLPanel()
-	err = client.exportPanelQueries(promqlPanel, tempDir, true)
+	err = client.ExportPanelQueries(promqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
-	// Verify PromQL file was created
+	// Verify PromQL file was created without refId suffix (single target)
 	promqlPath := filepath.Join(tempDir, "queries", "panel2.promql")
 	_, err = os.Stat(promqlPath)
 	assert.NoError(t, err)
@@ -173,29 +134,106 @@ func TestExportPanelQueries(t *testing.T) {
 	promqlContent, err := os.ReadFile(promqlPath)
 	assert.NoError(t, err)
 	assert.Equal(t, "up{job=\"test\"}", string(promqlContent))
+}
 
-	// Debug: list all files under tempDir
-	fmt.Println("--- Debug: Listing files under tempDir ---")
-	filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Printf("error: %v\n", err)
-			return nil
-		}
-		fmt.Println(path)
-		return nil
-	})
+func TestExportPanelQueriesMultiTarget(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "grafctl-export-multi-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a mock client
+	client := &Client{
+		Client:  &grafsdk.Client{},
+		apiURL:  "http://localhost:3000",
+		apiKey:  "test-key",
+		verbose: true,
+	}
+
+	// Test multi-target panel
+	multiTargetPanel := createMockMultiTargetPanel()
+	err = client.ExportPanelQueries(multiTargetPanel, tempDir, true)
+	assert.NoError(t, err)
+
+	// Verify multiple PromQL files were created with refId suffixes
+	promqlPath1 := filepath.Join(tempDir, "queries", "cpu_usage_f.promql")
+	_, err = os.Stat(promqlPath1)
+	assert.NoError(t, err)
+
+	promqlPath2 := filepath.Join(tempDir, "queries", "cpu_usage_b.promql")
+	_, err = os.Stat(promqlPath2)
+	assert.NoError(t, err)
+
+	promqlPath3 := filepath.Join(tempDir, "queries", "cpu_usage_a.promql")
+	_, err = os.Stat(promqlPath3)
+	assert.NoError(t, err)
+
+	// Verify content of first file
+	promqlContent1, err := os.ReadFile(promqlPath1)
+	assert.NoError(t, err)
+	assert.Equal(t, "avg by (mode)(irate(node_cpu_seconds_total{mode='idle',service=\"analyzer\"})) * 100", string(promqlContent1))
+
+	// Verify content of second file
+	promqlContent2, err := os.ReadFile(promqlPath2)
+	assert.NoError(t, err)
+	assert.Equal(t, "avg by (service)(irate(node_cpu_seconds_total{mode='user',service=\"analyzer\"})) * 100", string(promqlContent2))
+
+	// Verify content of third file
+	promqlContent3, err := os.ReadFile(promqlPath3)
+	assert.NoError(t, err)
+	assert.Equal(t, "avg by (service)(irate(node_cpu_seconds_total{mode=\"system\",service=\"analyzer\"})) * 100", string(promqlContent3))
+}
+
+func TestExportPanelQueriesBackwardCompatibility(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "grafctl-export-backward-test")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create a mock client
+	client := &Client{
+		Client:  &grafsdk.Client{},
+		apiURL:  "http://localhost:3000",
+		apiKey:  "test-key",
+		verbose: true,
+	}
+
+	// Test panel with old query= format
+	panel := simplejson.New()
+	panel.Set("type", "stat")
+	panel.Set("title", "Backward Compatible Panel")
+	panel.Set("description", "query=queries/old_panel")
+
+	datasource := map[string]interface{}{"type": "postgres"}
+	panel.Set("datasource", datasource)
+
+	target := map[string]interface{}{"rawSql": "SELECT * FROM old_table", "refId": "A"}
+	targets := []interface{}{target}
+	panel.Set("targets", targets)
+
+	err = client.ExportPanelQueries(panel, tempDir, true)
+	assert.NoError(t, err)
+
+	// Verify file was created with the old path format
+	sqlPath := filepath.Join(tempDir, "queries", "old_panel.sql")
+	_, err = os.Stat(sqlPath)
+	assert.NoError(t, err)
+
+	sqlContent, err := os.ReadFile(sqlPath)
+	assert.NoError(t, err)
+	assert.Equal(t, "SELECT * FROM old_table", string(sqlContent))
 }
 
 func createMockSQLPanel() *simplejson.Json {
 	panel := simplejson.New()
 	panel.Set("type", "stat")
 	panel.Set("title", "Test Panel 1")
-	panel.Set("description", "query=queries/panel1")
+	panel.Set("description", "queries/panel1")
 
 	datasource := map[string]interface{}{"type": "postgres"}
 	panel.Set("datasource", datasource)
 
-	target := map[string]interface{}{"rawSql": "SELECT * FROM test_table"}
+	target := map[string]interface{}{"rawSql": "SELECT * FROM test_table", "refId": "A"}
 	targets := []interface{}{target}
 	panel.Set("targets", targets)
 
@@ -206,13 +244,44 @@ func createMockPromQLPanel() *simplejson.Json {
 	panel := simplejson.New()
 	panel.Set("type", "graph")
 	panel.Set("title", "Test Panel 2")
-	panel.Set("description", "query=queries/panel2")
+	panel.Set("description", "queries/panel2")
 
 	datasource := map[string]interface{}{"type": "prometheus"}
 	panel.Set("datasource", datasource)
 
-	target := map[string]interface{}{"expr": "up{job=\"test\"}"}
+	target := map[string]interface{}{"expr": "up{job=\"test\"}", "refId": "A"}
 	targets := []interface{}{target}
+	panel.Set("targets", targets)
+
+	return panel
+}
+
+func createMockMultiTargetPanel() *simplejson.Json {
+	panel := simplejson.New()
+	panel.Set("type", "timeseries")
+	panel.Set("title", "CPU Usage")
+	panel.Set("description", "queries/cpu_usage")
+
+	datasource := map[string]interface{}{"type": "prometheus"}
+	panel.Set("datasource", datasource)
+
+	targets := []interface{}{
+		map[string]interface{}{
+			"expr":   "avg by (mode)(irate(node_cpu_seconds_total{mode='idle',service=\"analyzer\"})) * 100",
+			"refId":  "F",
+			"format": "time_series",
+		},
+		map[string]interface{}{
+			"expr":   "avg by (service)(irate(node_cpu_seconds_total{mode='user',service=\"analyzer\"})) * 100",
+			"refId":  "B",
+			"format": "time_series",
+		},
+		map[string]interface{}{
+			"expr":   "avg by (service)(irate(node_cpu_seconds_total{mode=\"system\",service=\"analyzer\"})) * 100",
+			"refId":  "A",
+			"format": "time_series",
+		},
+	}
 	panel.Set("targets", targets)
 
 	return panel
