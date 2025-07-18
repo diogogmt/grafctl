@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -25,6 +26,10 @@ type QueryManager struct {
 	m   map[string]*Query
 	dir string
 }
+
+var (
+	beforeQueryRegex = regexp.MustCompile(`.*/queries/(.+)`)
+)
 
 func NewQueryManager(queryDir string) (*QueryManager, error) {
 	dirAbs := queryDir
@@ -66,6 +71,35 @@ func (q QueryManager) Get(file string) *Query {
 	return nil
 }
 
+// GetByBaseAndRefId gets a query by base name and refId
+// For example, GetByBaseAndRefId("queries/panel1", "F") will look for "queries/panel1_f.sql" or "queries/panel1_f.promql"
+// If refId is empty or there's only one target, it will also try the base name without suffix
+func (q QueryManager) GetByBaseAndRefId(baseName string, refId string) *Query {
+	// First try the base name without refId (for single target cases)
+	if query := q.Get(baseName); query != nil {
+		return query
+	}
+
+	if refId == "" {
+		return nil
+	}
+
+	// Try with lowercase refId (as used in export)
+	lowerRefId := strings.ToLower(refId)
+
+	// Try SQL first
+	if query, ok := q.m[fmt.Sprintf("%s_%s.sql", baseName, lowerRefId)]; ok {
+		return query
+	}
+
+	// Try PromQL
+	if query, ok := q.m[fmt.Sprintf("%s_%s.promql", baseName, lowerRefId)]; ok {
+		return query
+	}
+
+	return nil
+}
+
 func (q QueryManager) Put(file string) error {
 	rawQuery, err := ioutil.ReadFile(file)
 	if err != nil {
@@ -88,6 +122,12 @@ func (q QueryManager) Put(file string) error {
 		}
 	} else {
 		return fmt.Errorf("query file: %s is not supported", file)
+	}
+
+	// Trim everything before /queries/
+	match := beforeQueryRegex.FindStringSubmatch(name)
+	if len(match) > 1 {
+		name = match[1]
 	}
 
 	q.m[name] = &query
