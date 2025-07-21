@@ -172,12 +172,12 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 
 	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
 		panel := simplejson.NewFromAny(panelBy)
-		if err := c.UpdatePanelTargets(queryManager, panel); err != nil {
+		if err := c.updatePanelTargets(queryManager, panel); err != nil {
 			return err
 		}
 		// older versions of row panels can have sub-panels
 		for _, subPanelBy := range panel.Get("panels").MustArray() {
-			if err := c.UpdatePanelTargets(queryManager, simplejson.NewFromAny(subPanelBy)); err != nil {
+			if err := c.updatePanelTargets(queryManager, simplejson.NewFromAny(subPanelBy)); err != nil {
 				return err
 			}
 		}
@@ -194,7 +194,7 @@ func (c *Client) SyncDashboard(ctx context.Context, uid string, queriesDir strin
 	return nil
 }
 
-func (c *Client) UpdatePanelTargets(queryManager *QueryManager, panel *simplejson.Json) error {
+func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejson.Json) error {
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
 	panelDesc := panel.Get("description").MustString()
@@ -310,12 +310,12 @@ func (c *Client) ExportDashboardQueries(ctx context.Context, uid string, queries
 	// Second pass: export queries
 	for _, panelBy := range dashboardFull.Dashboard.Get("panels").MustArray() {
 		panel := simplejson.NewFromAny(panelBy)
-		if err := c.ExportPanelQueries(panel, queriesSubdir, overwrite); err != nil {
+		if err := c.exportPanelQueries(panel, queriesSubdir, overwrite); err != nil {
 			return err
 		}
 		// Handle sub-panels in row panels (older versions)
 		for _, subPanelBy := range panel.Get("panels").MustArray() {
-			if err := c.ExportPanelQueries(simplejson.NewFromAny(subPanelBy), queriesSubdir, overwrite); err != nil {
+			if err := c.exportPanelQueries(simplejson.NewFromAny(subPanelBy), queriesSubdir, overwrite); err != nil {
 				return err
 			}
 		}
@@ -360,7 +360,7 @@ func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCou
 	descriptionPanels[baseQueryPath] = append(descriptionPanels[baseQueryPath], panelInfo)
 }
 
-func (c *Client) ExportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
+func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
 	panelType := panel.Get("type").MustString()
 	panelTitle := panel.Get("title").MustString()
 	panelDesc := panel.Get("description").MustString()

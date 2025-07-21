@@ -147,7 +147,7 @@ func TestUpdatePanelTargetsMultiQuery(t *testing.T) {
 	panel.Set("targets", targets)
 
 	// Update panel targets
-	err = client.UpdatePanelTargets(queryManager, panel)
+	err = client.updatePanelTargets(queryManager, panel)
 	assert.NoError(t, err)
 
 	// Verify targets were updated
@@ -213,7 +213,7 @@ func TestUpdatePanelTargetsBackwardCompatibility(t *testing.T) {
 	panel.Set("targets", targets)
 
 	// Update panel targets
-	err = client.UpdatePanelTargets(queryManager, panel)
+	err = client.updatePanelTargets(queryManager, panel)
 	assert.NoError(t, err)
 
 	// Verify target was updated
@@ -270,7 +270,7 @@ func TestUpdatePanelTargetsSingleTarget(t *testing.T) {
 	panel.Set("targets", targets)
 
 	// Update panel targets
-	err = client.UpdatePanelTargets(queryManager, panel)
+	err = client.updatePanelTargets(queryManager, panel)
 	assert.NoError(t, err)
 
 	// Verify target was updated

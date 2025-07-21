@@ -75,7 +75,7 @@ func TestExportPanelQueriesOverwrite(t *testing.T) {
 
 	// Test SQL panel with overwrite=false (should skip existing file)
 	sqlPanel := createMockSQLPanel()
-	err = client.ExportPanelQueries(sqlPanel, tempDir, false)
+	err = client.exportPanelQueries(sqlPanel, tempDir, false)
 	assert.NoError(t, err)
 
 	// Verify the existing file was not overwritten
@@ -84,7 +84,7 @@ func TestExportPanelQueriesOverwrite(t *testing.T) {
 	assert.Equal(t, "EXISTING CONTENT", string(content))
 
 	// Test SQL panel with overwrite=true (should overwrite existing file)
-	err = client.ExportPanelQueries(sqlPanel, tempDir, true)
+	err = client.exportPanelQueries(sqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify the file was overwritten
@@ -109,7 +109,7 @@ func TestExportPanelQueriesSingleTarget(t *testing.T) {
 
 	// Test SQL panel (single target)
 	sqlPanel := createMockSQLPanel()
-	err = client.ExportPanelQueries(sqlPanel, tempDir, true)
+	err = client.exportPanelQueries(sqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify SQL file was created without refId suffix (single target)
@@ -123,7 +123,7 @@ func TestExportPanelQueriesSingleTarget(t *testing.T) {
 
 	// Test PromQL panel (single target)
 	promqlPanel := createMockPromQLPanel()
-	err = client.ExportPanelQueries(promqlPanel, tempDir, true)
+	err = client.exportPanelQueries(promqlPanel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify PromQL file was created without refId suffix (single target)
@@ -152,7 +152,7 @@ func TestExportPanelQueriesMultiTarget(t *testing.T) {
 
 	// Test multi-target panel
 	multiTargetPanel := createMockMultiTargetPanel()
-	err = client.ExportPanelQueries(multiTargetPanel, tempDir, true)
+	err = client.exportPanelQueries(multiTargetPanel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify multiple PromQL files were created with refId suffixes
@@ -211,7 +211,7 @@ func TestExportPanelQueriesBackwardCompatibility(t *testing.T) {
 	targets := []interface{}{target}
 	panel.Set("targets", targets)
 
-	err = client.ExportPanelQueries(panel, tempDir, true)
+	err = client.exportPanelQueries(panel, tempDir, true)
 	assert.NoError(t, err)
 
 	// Verify file was created with the old path format
