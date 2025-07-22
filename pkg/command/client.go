@@ -209,28 +209,26 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 		return nil
 	}
 
-	queries := []*Query{}
-	for _, part := range strings.Split(panelDesc, "\n") {
-		queryParts := strings.Split(part, "query=")
-		if len(queryParts) != 2 {
-			continue
-		}
-		queryName := queryParts[1]
-		query := queryManager.Get(queryName)
-		if query == nil {
-			c.logd("[%s:%s] query %s not found", panelType, panelTitle, queryName)
-			continue
-		}
-		queries = append(queries, query)
-	}
-
-	if len(targetsBy) != len(queries) {
-		c.logd("found %d query(s) but only has %d target(s)", len(queries), len(targetsBy))
+	// Parse panel description to get base query path
+	baseQueryPath := c.getBaseQueryPath(panelDesc)
+	if baseQueryPath == "" {
+		c.logd("no valid query path found for panel %s:%q (description: %q)", panelType, panelTitle, panelDesc)
 		return nil
 	}
 
-	for i, query := range queries {
-		target := simplejson.NewFromAny(targetsBy[i])
+	// Update each target with its corresponding query based on refId
+	for i, targetBy := range targetsBy {
+		target := simplejson.NewFromAny(targetBy)
+		refId := target.Get("refId").MustString()
+
+		// Get query by base path and refId
+		query := queryManager.GetByBaseAndRefId(baseQueryPath, refId)
+		if query == nil {
+			c.logd("[%s:%s] query not found for base %s with refId %s", panelType, panelTitle, baseQueryPath, refId)
+			continue
+		}
+
+		// Update target with query content
 		switch query.Type {
 		case SQL:
 			target.Set("rawSql", query.Raw)
@@ -261,7 +259,7 @@ func (c *Client) updatePanelTargets(queryManager *QueryManager, panel *simplejso
 				target.Set("promQLQuery", promqlQuery)
 			}
 		}
-		c.logd("target updated: [%s:%s] query[%d] %s", panelType, panelTitle, i, query.Name)
+		c.logd("target updated: [%s:%s] target[%d] %s (refId: %s)", panelType, panelTitle, i, query.Name, refId)
 	}
 	return nil
 }
@@ -333,19 +331,16 @@ func (c *Client) collectPanelDescriptions(panel *simplejson.Json, descriptionCou
 		return
 	}
 
-	// Check if description is just "query=" or similar invalid format
-	queryPaths := c.parseQueryPaths(panelDesc)
-	if len(queryPaths) == 0 {
+	baseQueryPath := c.getBaseQueryPath(panelDesc)
+	if baseQueryPath == "" {
 		c.logd("panel %s:%q has invalid description format: %q", panelType, panelTitle, panelDesc)
 		return
 	}
 
-	// Track each query path
-	for _, queryPath := range queryPaths {
-		descriptionCounts[queryPath]++
-		panelInfo := fmt.Sprintf("%s:%s", panelType, panelTitle)
-		descriptionPanels[queryPath] = append(descriptionPanels[queryPath], panelInfo)
-	}
+	// Track the base query path (we don't need to track individual refId combinations since they'll be unique)
+	descriptionCounts[baseQueryPath]++
+	panelInfo := fmt.Sprintf("%s:%s", panelType, panelTitle)
+	descriptionPanels[baseQueryPath] = append(descriptionPanels[baseQueryPath], panelInfo)
 }
 
 func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, overwrite bool) error {
@@ -364,31 +359,40 @@ func (c *Client) exportPanelQueries(panel *simplejson.Json, queriesDir string, o
 		return nil
 	}
 
+	// Parse panel description to get base query path
+	baseQueryPath := c.getBaseQueryPath(panelDesc)
+	if baseQueryPath == "" {
+		c.logd("no valid query path found for panel %s:%q (description: %q)", panelType, panelTitle, panelDesc)
+		return nil
+	}
+
 	targetsBy := panel.Get("targets").MustArray()
 	if len(targetsBy) <= 0 {
 		c.logd("no targets found for panel %s:%q", panelType, panelTitle)
 		return nil
 	}
 
-	// Parse panel description to get query file paths
-	queryPaths := c.parseQueryPaths(panelDesc)
-	if len(queryPaths) == 0 {
-		c.logd("no valid query paths found for panel %s:%q (description: %q)", panelType, panelTitle, panelDesc)
+	if len(targetsBy) == 1 {
+		if err := c.exportTargetToFile(simplejson.NewFromAny(targetsBy[0]), datasource, baseQueryPath, queriesDir, overwrite); err != nil {
+			return err
+		}
+		c.logd("query exported: [%s:%s] target[%d] %s", panelType, panelTitle, 0, baseQueryPath)
 		return nil
 	}
 
-	if len(targetsBy) != len(queryPaths) {
-		c.logd("found %d query path(s) but only has %d target(s) for panel %s:%q", len(queryPaths), len(targetsBy), panelType, panelTitle)
-		return nil
-	}
+	// Export each target
+	for i, targetBy := range targetsBy {
+		target := simplejson.NewFromAny(targetBy)
+		refId := target.Get("refId").MustString()
 
-	// Export each target to its corresponding query file
-	for i, queryPath := range queryPaths {
-		target := simplejson.NewFromAny(targetsBy[i])
+		// Multiple targets - add refId to make filenames unique
+		// Making an assumption that refId is unique for each target and that it's not empty.
+		queryPath := fmt.Sprintf("%s_%s", baseQueryPath, strings.ToLower(refId))
+
 		if err := c.exportTargetToFile(target, datasource, queryPath, queriesDir, overwrite); err != nil {
 			return err
 		}
-		c.logd("query exported: [%s:%s] query[%d] %s", panelType, panelTitle, i, queryPath)
+		c.logd("query exported: [%s:%s] target[%d] %s (refId: %s)", panelType, panelTitle, i, queryPath, refId)
 	}
 
 	return nil
@@ -635,4 +639,14 @@ func (c *Client) logd(format string, args ...interface{}) {
 		return
 	}
 	log.Printf(format, args...)
+}
+
+func (c *Client) getBaseQueryPath(panelDesc string) string {
+	queryPaths := c.parseQueryPaths(panelDesc)
+	if len(queryPaths) > 0 {
+		// Use the first query path as base if multiple are provided (backward compatibility)
+		return queryPaths[0]
+	}
+	// If no query paths found, use panel description as base name
+	return strings.TrimSpace(panelDesc)
 }
